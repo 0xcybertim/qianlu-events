@@ -1,0 +1,332 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum EventStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum TaskType {
+  SOCIAL_FOLLOW
+  SOCIAL_LIKE
+  SOCIAL_SHARE
+  SOCIAL_COMMENT
+  LEAD_FORM
+  QUIZ
+  NEWSLETTER_OPT_IN
+  WHATSAPP_OPT_IN
+  REFERRAL
+  PHOTO_PROOF
+  STAMP_SCAN
+}
+
+enum SocialPlatform {
+  INSTAGRAM
+  FACEBOOK
+  TIKTOK
+  WHATSAPP
+  EMAIL
+  IN_PERSON
+  NONE
+}
+
+enum VerificationType {
+  NONE
+  AUTOMATIC
+  VISUAL_STAFF_CHECK
+  STAFF_PIN_CONFIRM
+}
+
+enum TaskAttemptStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED_BY_USER
+  PENDING_STAFF_CHECK
+  PENDING_AUTO_VERIFICATION
+  VERIFIED
+  REJECTED
+}
+
+enum VerificationActionType {
+  APPROVED
+  REJECTED
+}
+
+enum RewardType {
+  INSTANT_REWARD
+  TIERED_REWARD
+  DAILY_PRIZE_DRAW
+}
+
+enum QrScanStatus {
+  ACCEPTED
+  DUPLICATE
+  EXPIRED
+  INACTIVE
+  WRONG_EVENT
+}
+
+enum AdminRole {
+  OWNER
+  EDITOR
+  VIEWER
+}
+
+model Event {
+  id                 String                 @id @default(cuid())
+  slug               String                 @unique
+  name               String
+  status             EventStatus            @default(DRAFT)
+  startsAt           DateTime?
+  endsAt             DateTime?
+  brandingJson       Json?
+  settingsJson       Json?
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+  tasks              Task[]
+  qrCodes            QrCode[]
+  sessions           ParticipantSession[]
+  adminAccess        AdminEventAccess[]
+  adminFacebookOauthStates AdminFacebookOAuthState[]
+  facebookConnection EventFacebookConnection?
+}
+
+model AdminAccount {
+  id           String             @id @default(cuid())
+  email        String             @unique
+  name         String?
+  passwordHash String
+  isActive     Boolean            @default(true)
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  facebookOauthStates AdminFacebookOAuthState[]
+  eventAccess  AdminEventAccess[]
+  sessions     AdminSession[]
+}
+
+model AdminEventAccess {
+  id             String       @id @default(cuid())
+  adminAccountId String
+  eventId        String
+  role           AdminRole    @default(EDITOR)
+  createdAt      DateTime     @default(now())
+  adminAccount   AdminAccount @relation(fields: [adminAccountId], references: [id], onDelete: Cascade)
+  event          Event        @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@unique([adminAccountId, eventId])
+  @@index([eventId])
+}
+
+model AdminSession {
+  id             String       @id @default(cuid())
+  adminAccountId String
+  tokenHash      String       @unique
+  expiresAt      DateTime
+  createdAt      DateTime     @default(now())
+  adminAccount   AdminAccount @relation(fields: [adminAccountId], references: [id], onDelete: Cascade)
+
+  @@index([adminAccountId])
+  @@index([expiresAt])
+}
+
+model AdminFacebookOAuthState {
+  id             String       @id @default(cuid())
+  adminAccountId String
+  eventId        String
+  state          String       @unique
+  pageOptionsJson Json?
+  expiresAt      DateTime
+  consumedAt     DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  adminAccount   AdminAccount @relation(fields: [adminAccountId], references: [id], onDelete: Cascade)
+  event          Event        @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([adminAccountId, eventId])
+  @@index([expiresAt])
+}
+
+model Task {
+  id                   String           @id @default(cuid())
+  eventId              String
+  type                 TaskType
+  platform             SocialPlatform   @default(NONE)
+  title                String
+  description          String
+  points               Int
+  sortOrder            Int              @default(0)
+  requiresVerification Boolean          @default(true)
+  verificationType     VerificationType @default(VISUAL_STAFF_CHECK)
+  configJson           Json?
+  isActive             Boolean          @default(true)
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+  event                Event            @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  qrCodes              QrCode[]
+  qrScans              QrScan[]
+  socialCommentVerifications SocialCommentVerification[]
+  taskAttempts         TaskAttempt[]
+
+  @@index([eventId, sortOrder])
+}
+
+model ParticipantSession {
+  id                    String               @id @default(cuid())
+  eventId               String
+  anonymousToken        String               @unique
+  verificationCode      String
+  email                 String?
+  name                  String?
+  claimedPoints         Int                  @default(0)
+  verifiedPoints        Int                  @default(0)
+  rewardTier            String?
+  instantRewardEligible Boolean              @default(false)
+  dailyDrawEligible     Boolean              @default(false)
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+  event                 Event                @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  qrScans               QrScan[]
+  rewardEligibility     RewardEligibility[]
+  socialCommentVerifications SocialCommentVerification[]
+  taskAttempts          TaskAttempt[]
+  verificationActions   VerificationAction[]
+
+  @@unique([eventId, verificationCode])
+  @@index([eventId])
+}
+
+model TaskAttempt {
+  id                   String               @id @default(cuid())
+  participantSessionId String
+  taskId               String
+  status               TaskAttemptStatus    @default(NOT_STARTED)
+  claimedAt            DateTime?
+  verifiedAt           DateTime?
+  rejectedAt           DateTime?
+  verificationRequired Boolean              @default(true)
+  proofJson            Json?
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+  participantSession   ParticipantSession   @relation(fields: [participantSessionId], references: [id], onDelete: Cascade)
+  task                 Task                 @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  socialCommentVerifications SocialCommentVerification[]
+  verificationActions  VerificationAction[]
+
+  @@unique([participantSessionId, taskId])
+  @@index([taskId])
+}
+
+model SocialCommentVerification {
+  id                   String             @id @default(cuid())
+  platform             SocialPlatform
+  externalCommentId    String
+  externalPostId       String?
+  commentText          String?
+  rawPayload           Json
+  matched              Boolean            @default(false)
+  participantSessionId String?
+  taskId               String?
+  taskAttemptId        String?
+  processedAt          DateTime?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  participantSession   ParticipantSession? @relation(fields: [participantSessionId], references: [id], onDelete: SetNull)
+  task                 Task?              @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  taskAttempt          TaskAttempt?       @relation(fields: [taskAttemptId], references: [id], onDelete: SetNull)
+
+  @@unique([platform, externalCommentId])
+  @@index([participantSessionId])
+  @@index([taskId])
+  @@index([taskAttemptId])
+}
+
+model VerificationAction {
+  id                   String                 @id @default(cuid())
+  participantSessionId String
+  taskAttemptId        String
+  action               VerificationActionType
+  verifiedByType       String
+  verifiedByIdentifier String?
+  notes                String?
+  createdAt            DateTime               @default(now())
+  participantSession   ParticipantSession     @relation(fields: [participantSessionId], references: [id], onDelete: Cascade)
+  taskAttempt          TaskAttempt            @relation(fields: [taskAttemptId], references: [id], onDelete: Cascade)
+
+  @@index([participantSessionId])
+  @@index([taskAttemptId])
+}
+
+model EventFacebookConnection {
+  id              String   @id @default(cuid())
+  eventId         String   @unique
+  pageId          String
+  pageName        String?
+  pageAccessToken String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  event           Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([pageId])
+}
+
+model RewardEligibility {
+  id                   String             @id @default(cuid())
+  participantSessionId String
+  rewardType           RewardType
+  rewardKey            String
+  eligible             Boolean            @default(false)
+  verified             Boolean            @default(false)
+  reason               String?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  participantSession   ParticipantSession @relation(fields: [participantSessionId], references: [id], onDelete: Cascade)
+
+  @@index([participantSessionId])
+}
+
+model QrCode {
+  id                  String    @id @default(cuid())
+  eventId             String
+  taskId              String
+  label               String
+  tokenHash           String    @unique
+  publicToken         String?   @unique
+  validFrom           DateTime?
+  validUntil          DateTime?
+  scanLimitPerSession Int       @default(1)
+  cooldownSeconds     Int?
+  isActive            Boolean   @default(true)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  event               Event     @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  task                Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  scans               QrScan[]
+
+  @@index([eventId])
+  @@index([taskId])
+}
+
+model QrScan {
+  id                   String             @id @default(cuid())
+  participantSessionId String
+  qrCodeId             String
+  taskId               String
+  status               QrScanStatus
+  pointsAwarded        Int                @default(0)
+  rejectionReason      String?
+  scannedAt            DateTime           @default(now())
+  participantSession   ParticipantSession @relation(fields: [participantSessionId], references: [id], onDelete: Cascade)
+  qrCode               QrCode             @relation(fields: [qrCodeId], references: [id], onDelete: Cascade)
+  task                 Task               @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([participantSessionId])
+  @@index([qrCodeId])
+  @@index([taskId])
+}

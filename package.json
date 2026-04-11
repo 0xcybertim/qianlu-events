@@ -1,0 +1,46 @@
+{
+  "name": "qianlu-events",
+  "private": true,
+  "type": "module",
+  "packageManager": "npm@10.9.4",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "build:web": "npm run build --workspace @qianlu-events/web",
+    "build:api": "npm run build --workspace @qianlu-events/api",
+    "dev": "concurrently -n web,api -c cyan,magenta \"npm run dev:web\" \"npm run dev:api\"",
+    "dev:network": "node scripts/dev-network.mjs",
+    "dev:web": "npm run dev --workspace @qianlu-events/web",
+    "dev:api": "npm run dev --workspace @qianlu-events/api",
+    "start:web": "npm run start --workspace @qianlu-events/web",
+    "start:api": "npm run start --workspace @qianlu-events/api",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "db:start": "docker compose up -d db",
+    "db:stop": "docker compose stop db",
+    "db:generate": "prisma generate",
+    "db:migrate:deploy": "prisma migrate deploy",
+    "db:migrate": "prisma migrate dev",
+    "db:push": "prisma db push",
+    "db:seed": "tsx scripts/setup-demo-event.ts",
+    "render:build:web": "npm run build:web",
+    "render:build:api": "npm run db:generate && npm run build:api",
+    "render:predeploy:api": "npm run db:migrate:deploy"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.0",
+    "concurrently": "^9.2.1",
+    "dotenv": "^17.2.3",
+    "prisma": "^6.19.3",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.3"
+  }
+}

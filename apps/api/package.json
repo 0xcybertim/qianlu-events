@@ -1,0 +1,27 @@
+{
+  "name": "@qianlu-events/api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsup src/server.ts --format esm --target node22 --out-dir dist --clean",
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/server.js",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@fastify/cookie": "^11.0.2",
+    "@fastify/cors": "^11.2.0",
+    "@prisma/client": "^6.19.3",
+    "@qianlu-events/config": "0.0.0",
+    "@qianlu-events/domain": "0.0.0",
+    "@qianlu-events/schemas": "0.0.0",
+    "dotenv": "^17.2.3",
+    "fastify": "^5.8.4",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "tsup": "^8.5.1",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}
