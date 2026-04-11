@@ -8,6 +8,8 @@ services:
     startCommand: npm run start:web
     healthCheckPath: /health
     envVars:
+      - key: NPM_CONFIG_PRODUCTION
+        value: "false"
       - key: HOST
         value: 0.0.0.0
       - key: API_BASE_URL
@@ -31,6 +33,8 @@ services:
     startCommand: npm run start:api
     healthCheckPath: /health
     envVars:
+      - key: NPM_CONFIG_PRODUCTION
+        value: "false"
       - key: DATABASE_URL
         fromDatabase:
           name: qianlu-events-db
