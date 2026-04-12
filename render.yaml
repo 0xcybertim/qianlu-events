@@ -4,7 +4,7 @@ services:
     name: qianlu-events-web
     region: frankfurt
     plan: starter
-    buildCommand: npm run render:build:web
+    buildCommand: npm install --include=dev && npm run render:build:web
     startCommand: npm run start:web
     healthCheckPath: /health
     envVars:
@@ -28,7 +28,7 @@ services:
     name: qianlu-events-api
     region: frankfurt
     plan: starter
-    buildCommand: npm run render:build:api
+    buildCommand: npm install --include=dev && npm run render:build:api
     preDeployCommand: npm run render:predeploy:api
     startCommand: npm run start:api
     healthCheckPath: /health
