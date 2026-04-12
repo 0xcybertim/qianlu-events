@@ -79,10 +79,20 @@ function FacebookOnboardingCard({
   latestFacebookDebug?: {
     consumedAt: string | null;
     createdAt: string;
+    droppedPages: {
+      pageId: string | null;
+      pageName: string | null;
+      reason: "missing_access_token" | "missing_id" | "missing_name";
+    }[];
     expiresAt: string;
     pages: {
       pageId: string;
       pageName: string;
+    }[];
+    rawPages: {
+      accessTokenReturned: boolean;
+      pageId: string | null;
+      pageName: string | null;
     }[];
     state: string;
   } | null;
@@ -283,6 +293,7 @@ function FacebookOnboardingCard({
               .
             </p>
             <p>Returned Pages: {latestFacebookDebug.pages.length}</p>
+            <p>Raw assets from Meta: {latestFacebookDebug.rawPages.length}</p>
             {latestFacebookDebug.pages.length > 0 ? (
               <ul className="space-y-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] px-4 py-3">
                 {latestFacebookDebug.pages.map((page) => (
@@ -296,6 +307,35 @@ function FacebookOnboardingCard({
                 Meta returned no manageable Pages for the last OAuth attempt.
               </p>
             )}
+            {latestFacebookDebug.rawPages.length > 0 ? (
+              <div className="space-y-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                  Raw assets returned by Meta
+                </p>
+                <ul className="space-y-2">
+                  {latestFacebookDebug.rawPages.map((page, index) => (
+                    <li key={`${page.pageId ?? "unknown"}-${index}`} className="font-mono text-xs leading-6 text-slate-900">
+                      {(page.pageName ?? "Unnamed")} ({page.pageId ?? "no-id"}) | access token returned:{" "}
+                      {page.accessTokenReturned ? "yes" : "no"}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {latestFacebookDebug.droppedPages.length > 0 ? (
+              <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-800">
+                  Dropped assets
+                </p>
+                <ul className="space-y-2 text-xs leading-6 text-amber-900">
+                  {latestFacebookDebug.droppedPages.map((page, index) => (
+                    <li key={`${page.pageId ?? "unknown"}-${page.reason}-${index}`}>
+                      {(page.pageName ?? "Unnamed")} ({page.pageId ?? "no-id"}) | dropped because {page.reason}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
           </div>
         ) : (
           <p className="mt-4 text-sm leading-6 text-slate-700">

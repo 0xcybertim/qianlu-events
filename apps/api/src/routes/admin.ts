@@ -518,6 +518,24 @@ const facebookPendingPageOptionSchema = z.object({
   pageAccessToken: z.string().min(1),
 });
 
+const facebookOauthStoredPageSchema = z.object({
+  id: z.string().optional(),
+  name: z.string().optional(),
+  access_token: z.string().optional(),
+});
+
+const facebookOauthDroppedPageSchema = z.object({
+  pageId: z.string().nullable(),
+  pageName: z.string().nullable(),
+  reason: z.enum(["missing_access_token", "missing_id", "missing_name"]),
+});
+
+const facebookOauthStoredDebugSchema = z.object({
+  usablePages: z.array(facebookPendingPageOptionSchema).default([]),
+  rawPages: z.array(facebookOauthStoredPageSchema).default([]),
+  droppedPages: z.array(facebookOauthDroppedPageSchema).default([]),
+});
+
 function getApiBaseUrl() {
   return (
     process.env.API_BASE_URL?.trim() ||
@@ -556,6 +574,20 @@ function parsePendingFacebookPageOptions(value: Prisma.JsonValue | null) {
   return result.success ? result.data : [];
 }
 
+function parseFacebookOauthStoredDebug(value: Prisma.JsonValue | null) {
+  const result = facebookOauthStoredDebugSchema.safeParse(value);
+
+  if (result.success) {
+    return result.data;
+  }
+
+  return {
+    droppedPages: [],
+    rawPages: [],
+    usablePages: parsePendingFacebookPageOptions(value),
+  };
+}
+
 function serializePendingFacebookConnection(
   state: {
     expiresAt: Date;
@@ -566,7 +598,7 @@ function serializePendingFacebookConnection(
     return null;
   }
 
-  const pages = parsePendingFacebookPageOptions(state.pageOptionsJson);
+  const pages = parseFacebookOauthStoredDebug(state.pageOptionsJson).usablePages;
 
   if (pages.length === 0) {
     return null;
@@ -598,10 +630,16 @@ function serializeFacebookOauthDebugState(
     createdAt: state.createdAt.toISOString(),
     consumedAt: state.consumedAt?.toISOString() ?? null,
     expiresAt: state.expiresAt.toISOString(),
-    pages: parsePendingFacebookPageOptions(state.pageOptionsJson).map((page) => ({
+    pages: parseFacebookOauthStoredDebug(state.pageOptionsJson).usablePages.map((page) => ({
       pageId: page.pageId,
       pageName: page.pageName,
     })),
+    rawPages: parseFacebookOauthStoredDebug(state.pageOptionsJson).rawPages.map((page) => ({
+      accessTokenReturned: Boolean(page.access_token),
+      pageId: page.id ?? null,
+      pageName: page.name ?? null,
+    })),
+    droppedPages: parseFacebookOauthStoredDebug(state.pageOptionsJson).droppedPages,
     state: state.state,
   };
 }
@@ -1110,9 +1148,9 @@ export function registerAdminRoutes(app: FastifyInstance) {
         };
       }
 
-      const selectedPage = parsePendingFacebookPageOptions(
+      const selectedPage = parseFacebookOauthStoredDebug(
         state.pageOptionsJson,
-      ).find((page) => page.pageId === body.pageId);
+      ).usablePages.find((page) => page.pageId === body.pageId);
 
       if (!selectedPage) {
         reply.code(400);
@@ -1279,16 +1317,22 @@ export function registerAdminRoutes(app: FastifyInstance) {
         code: request.query.code,
         redirectUri: getFacebookOAuthRedirectUri(),
       });
-      const pages = await fetchFacebookManagedPages(userAccessToken);
+      const { droppedPages, rawPages, usablePages } =
+        await fetchFacebookManagedPages(userAccessToken);
+      const debugPayload = {
+        droppedPages,
+        rawPages,
+        usablePages,
+      } satisfies Prisma.InputJsonValue;
 
-      if (pages.length === 0) {
+      if (usablePages.length === 0) {
         await prisma.adminFacebookOAuthState.update({
           where: {
             id: oauthState.id,
           },
           data: {
             consumedAt: new Date(),
-            pageOptionsJson: [] as Prisma.InputJsonValue,
+            pageOptionsJson: debugPayload,
           },
         });
 
@@ -1297,8 +1341,8 @@ export function registerAdminRoutes(app: FastifyInstance) {
         );
       }
 
-      if (pages.length === 1) {
-        const [page] = pages;
+      if (usablePages.length === 1) {
+        const [page] = usablePages;
 
         await prisma.$transaction([
           prisma.eventFacebookConnection.upsert({
@@ -1323,7 +1367,7 @@ export function registerAdminRoutes(app: FastifyInstance) {
             },
             data: {
               consumedAt: new Date(),
-              pageOptionsJson: pages as Prisma.InputJsonValue,
+              pageOptionsJson: debugPayload,
             },
           }),
         ]);
@@ -1338,7 +1382,7 @@ export function registerAdminRoutes(app: FastifyInstance) {
           id: oauthState.id,
         },
         data: {
-          pageOptionsJson: pages as Prisma.InputJsonValue,
+          pageOptionsJson: debugPayload,
         },
       });
 

@@ -33,7 +33,7 @@ type FacebookOAuthTokenResponse = {
   access_token?: string;
 };
 
-type FacebookManagedPage = {
+export type FacebookManagedPage = {
   access_token?: string;
   id?: string;
   name?: string;
@@ -43,6 +43,12 @@ export type FacebookPageConnectionOption = {
   pageAccessToken: string;
   pageId: string;
   pageName: string;
+};
+
+export type FacebookManagedPageDrop = {
+  pageId: string | null;
+  pageName: string | null;
+  reason: "missing_access_token" | "missing_id" | "missing_name";
 };
 
 function buildGraphUrl(path: string, params?: Record<string, string>) {
@@ -140,19 +146,50 @@ export async function fetchFacebookManagedPages(userAccessToken: string) {
     limit: "100",
   });
 
-  return (response?.data ?? []).flatMap((page) => {
-    if (!page.id || !page.name || !page.access_token) {
-      return [];
+  const rawPages = response?.data ?? [];
+  const usablePages: FacebookPageConnectionOption[] = [];
+  const droppedPages: FacebookManagedPageDrop[] = [];
+
+  for (const page of rawPages) {
+    if (!page.id) {
+      droppedPages.push({
+        pageId: null,
+        pageName: page.name ?? null,
+        reason: "missing_id",
+      });
+      continue;
     }
 
-    return [
-      {
-        pageAccessToken: page.access_token,
+    if (!page.name) {
+      droppedPages.push({
+        pageId: page.id,
+        pageName: null,
+        reason: "missing_name",
+      });
+      continue;
+    }
+
+    if (!page.access_token) {
+      droppedPages.push({
         pageId: page.id,
         pageName: page.name,
-      } satisfies FacebookPageConnectionOption,
-    ];
-  });
+        reason: "missing_access_token",
+      });
+      continue;
+    }
+
+    usablePages.push({
+      pageAccessToken: page.access_token,
+      pageId: page.id,
+      pageName: page.name,
+    });
+  }
+
+  return {
+    droppedPages,
+    rawPages,
+    usablePages,
+  };
 }
 
 export function verifyFacebookWebhookSignature(args: {

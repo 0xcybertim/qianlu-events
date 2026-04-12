@@ -348,6 +348,20 @@ export const adminFacebookConnectionDebugSchema = z.object({
   consumedAt: z.string().nullable(),
   expiresAt: z.string(),
   pages: z.array(adminFacebookPageOptionSchema),
+  rawPages: z.array(
+    z.object({
+      accessTokenReturned: z.boolean(),
+      pageId: z.string().nullable(),
+      pageName: z.string().nullable(),
+    }),
+  ),
+  droppedPages: z.array(
+    z.object({
+      pageId: z.string().nullable(),
+      pageName: z.string().nullable(),
+      reason: z.enum(["missing_access_token", "missing_id", "missing_name"]),
+    }),
+  ),
   state: z.string(),
 });
 
