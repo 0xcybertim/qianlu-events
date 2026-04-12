@@ -35,6 +35,7 @@ This is the first automatic social verification flow in the Qianlu Events app.
 ## Platform environment variables
 
 - `FACEBOOK_APP_ID`
+- `FACEBOOK_LOGIN_CONFIGURATION_ID`
 - `FACEBOOK_APP_SECRET`
 - `FACEBOOK_VERIFY_TOKEN`
 - `API_BASE_URL`
@@ -58,13 +59,14 @@ Facebook post settings still live in the task config itself.
 ## Facebook setup checklist
 
 1. Create or use a Meta app with Facebook Login / Graph access as required for Page webhooks.
-2. Subscribe the app to the Page webhook feed events needed for Page comments.
-3. Set the callback URL to the deployed `GET/POST /integrations/facebook/webhook` endpoints.
-4. Set the verify token to the same value as `FACEBOOK_VERIFY_TOKEN`.
-5. Set `WEB_BASE_URL` so the API callback can redirect organizers back to the admin UI after Meta login.
-6. Use the `Connect Facebook Page` button in the event task screen and finish the Meta login flow.
-7. If Meta returns multiple Pages, choose the correct Page in the organizer UI.
-8. Use the Graph API post ID from the target Facebook post in the task config.
+2. In `Facebook Login for Business -> Configurations`, copy the configuration ID and set it as `FACEBOOK_LOGIN_CONFIGURATION_ID` on the API.
+3. Subscribe the app to the Page webhook feed events needed for Page comments.
+4. Set the callback URL to the deployed `GET/POST /integrations/facebook/webhook` endpoints.
+5. Set the verify token to the same value as `FACEBOOK_VERIFY_TOKEN`.
+6. Set `WEB_BASE_URL` so the API callback can redirect organizers back to the admin UI after Meta login.
+7. Use the `Connect Facebook Page` button in the event task screen and finish the Meta login flow.
+8. If Meta returns multiple Pages, choose the correct Page in the organizer UI.
+9. Use the Graph API post ID from the target Facebook post in the task config.
 
 ## Safety and idempotency
 

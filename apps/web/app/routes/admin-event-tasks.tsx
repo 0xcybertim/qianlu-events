@@ -143,6 +143,7 @@ function FacebookOnboardingCard({
           </p>
           <div className="mt-3 rounded-xl bg-slate-950 px-4 py-3 font-mono text-xs leading-6 text-white">
             <div>FACEBOOK_APP_ID=...</div>
+            <div>FACEBOOK_LOGIN_CONFIGURATION_ID=...</div>
             <div>FACEBOOK_APP_SECRET=...</div>
             <div>FACEBOOK_VERIFY_TOKEN=...</div>
           </div>

@@ -105,6 +105,10 @@ export function buildFacebookOAuthUrl(args: {
   url.searchParams.set("response_type", "code");
   url.searchParams.set("scope", facebookOAuthScopes);
 
+  if (config.loginConfigurationId) {
+    url.searchParams.set("config_id", config.loginConfigurationId);
+  }
+
   return url.toString();
 }
 

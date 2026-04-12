@@ -15,6 +15,7 @@ const staffPinConfigSchema = z.object({
 
 const facebookConfigSchema = z.object({
   appId: z.string().trim().min(1).optional(),
+  loginConfigurationId: z.string().trim().min(1).optional(),
   appSecret: z.string().trim().min(1).optional(),
   verifyToken: z.string().trim().min(1).optional(),
 });
@@ -35,6 +36,7 @@ export function getStaffPinConfig() {
 export function getFacebookConfig() {
   return facebookConfigSchema.parse({
     appId: process.env.FACEBOOK_APP_ID,
+    loginConfigurationId: process.env.FACEBOOK_LOGIN_CONFIGURATION_ID,
     appSecret: process.env.FACEBOOK_APP_SECRET,
     verifyToken: process.env.FACEBOOK_VERIFY_TOKEN,
   });
