@@ -3,10 +3,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node ../../node_modules/@react-router/dev/bin.js build",
-    "dev": "node ../../node_modules/@react-router/dev/bin.js dev",
-    "start": "node ../../node_modules/@react-router/serve/bin.js ./build/server/index.js",
-    "typecheck": "node ../../node_modules/@react-router/dev/bin.js typegen && tsc"
+    "build": "npm exec --package @react-router/dev react-router -- build",
+    "dev": "npm exec --package @react-router/dev react-router -- dev",
+    "start": "npm exec --package @react-router/serve react-router-serve -- ./build/server/index.js",
+    "typecheck": "npm exec --package @react-router/dev react-router -- typegen && tsc"
   },
   "dependencies": {
     "@react-router/dev": "7.14.0",
