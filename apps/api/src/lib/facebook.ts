@@ -4,6 +4,7 @@ import { getFacebookConfig } from "@qianlu-events/config";
 
 const facebookApiVersion = "v22.0";
 const facebookOAuthScopes = [
+  "business_management",
   "pages_show_list",
   "pages_read_engagement",
   "pages_manage_metadata",

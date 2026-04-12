@@ -64,9 +64,14 @@ Facebook post settings still live in the task config itself.
 4. Set the callback URL to the deployed `GET/POST /integrations/facebook/webhook` endpoints.
 5. Set the verify token to the same value as `FACEBOOK_VERIFY_TOKEN`.
 6. Set `WEB_BASE_URL` so the API callback can redirect organizers back to the admin UI after Meta login.
-7. Use the `Connect Facebook Page` button in the event task screen and finish the Meta login flow.
-8. If Meta returns multiple Pages, choose the correct Page in the organizer UI.
-9. Use the Graph API post ID from the target Facebook post in the task config.
+7. In `Facebook Login for Business`, make sure the configuration requests:
+   - `business_management`
+   - `pages_show_list`
+   - `pages_read_engagement`
+   - `pages_manage_metadata`
+8. Use the `Connect Facebook Page` button in the event task screen and finish the Meta login flow.
+9. If Meta returns multiple Pages, choose the correct Page in the organizer UI.
+10. Use the Graph API post ID from the target Facebook post in the task config.
 
 ## Safety and idempotency
 

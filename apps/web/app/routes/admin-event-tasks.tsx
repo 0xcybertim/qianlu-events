@@ -352,11 +352,12 @@ function FacebookOnboardingCard({
         </p>
         <ol className="mt-3 space-y-3 text-sm leading-6 text-slate-700">
           <li>1. Open your Meta app in Meta for Developers and add the Webhooks product.</li>
-          <li>2. Choose the `Page` object and subscribe your app to it.</li>
-          <li>3. Paste the callback URL shown above and verify it with the same verify token value.</li>
-          <li>4. Subscribe the Page webhook to the `feed` field so Page comment events reach this app.</li>
-          <li>5. Use the `Connect Facebook Page` button above and sign in with the organizer&apos;s Meta account.</li>
-          <li>6. Copy the target Facebook post URL and its Graph API post ID for the task below.</li>
+          <li>2. In `Facebook Login for Business`, use the `User access token` configuration with `business_management`, `pages_show_list`, `pages_read_engagement`, and `pages_manage_metadata`.</li>
+          <li>3. Choose the `Page` object and subscribe your app to it.</li>
+          <li>4. Paste the callback URL shown above and verify it with the same verify token value.</li>
+          <li>5. Subscribe the Page webhook to the `feed` field so Page comment events reach this app.</li>
+          <li>6. Use the `Connect Facebook Page` button above and sign in with the organizer&apos;s Meta account.</li>
+          <li>7. Copy the target Facebook post URL and its Graph API post ID for the task below.</li>
         </ol>
       </div>
 
