@@ -343,6 +343,14 @@ export const adminFacebookConnectionSelectBodySchema = z.object({
   pageId: z.string().trim().min(1),
 });
 
+export const adminFacebookConnectionDebugSchema = z.object({
+  createdAt: z.string(),
+  consumedAt: z.string().nullable(),
+  expiresAt: z.string(),
+  pages: z.array(adminFacebookPageOptionSchema),
+  state: z.string(),
+});
+
 export const adminParticipantStatusCountsSchema = z.record(
   taskAttemptStatusSchema,
   z.number().int().nonnegative(),

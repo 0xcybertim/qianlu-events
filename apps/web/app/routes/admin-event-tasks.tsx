@@ -6,6 +6,7 @@ import {
   createAdminTask,
   disableAdminTask,
   fetchAdminEvent,
+  fetchAdminFacebookConnectionDebug,
   fetchAdminFacebookPendingConnection,
   selectAdminFacebookConnection,
   updateAdminTask,
@@ -63,6 +64,7 @@ function FacebookOnboardingCard({
   connection,
   connectStatus,
   eventSlug,
+  latestFacebookDebug,
   pendingConnection,
 }: {
   connectStatus?: string | null;
@@ -74,6 +76,16 @@ function FacebookOnboardingCard({
     updatedAt: string;
   } | null;
   eventSlug: string;
+  latestFacebookDebug?: {
+    consumedAt: string | null;
+    createdAt: string;
+    expiresAt: string;
+    pages: {
+      pageId: string;
+      pageName: string;
+    }[];
+    state: string;
+  } | null;
   pendingConnection?: {
     expiresAt: string;
     pages: {
@@ -225,6 +237,75 @@ function FacebookOnboardingCard({
       ) : null}
 
       <div className="mt-4 rounded-2xl bg-white/70 p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+              Facebook OAuth debug
+            </p>
+            <p className="mt-2 text-sm leading-6 text-slate-700">
+              Inspect the latest Meta OAuth result stored for this event.
+            </p>
+          </div>
+          {latestFacebookDebug ? (
+            <StatusBadge
+              label={latestFacebookDebug.consumedAt ? "CONSUMED" : "PENDING"}
+              tone={latestFacebookDebug.consumedAt ? "neutral" : "warning"}
+            />
+          ) : (
+            <StatusBadge label="NO DEBUG DATA" tone="neutral" />
+          )}
+        </div>
+        {latestFacebookDebug ? (
+          <div className="mt-4 space-y-3 text-sm leading-6 text-slate-700">
+            <p>
+              Last OAuth attempt{" "}
+              {new Intl.DateTimeFormat("en", {
+                dateStyle: "medium",
+                timeStyle: "short",
+              }).format(new Date(latestFacebookDebug.createdAt))}
+              {latestFacebookDebug.consumedAt
+                ? `, consumed ${new Intl.DateTimeFormat("en", {
+                    dateStyle: "medium",
+                    timeStyle: "short",
+                  }).format(new Date(latestFacebookDebug.consumedAt))}`
+                : ""}
+              .
+            </p>
+            <p>
+              Stored state: <code>{latestFacebookDebug.state}</code>
+            </p>
+            <p>
+              Selection expires{" "}
+              {new Intl.DateTimeFormat("en", {
+                dateStyle: "medium",
+                timeStyle: "short",
+              }).format(new Date(latestFacebookDebug.expiresAt))}
+              .
+            </p>
+            <p>Returned Pages: {latestFacebookDebug.pages.length}</p>
+            {latestFacebookDebug.pages.length > 0 ? (
+              <ul className="space-y-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] px-4 py-3">
+                {latestFacebookDebug.pages.map((page) => (
+                  <li key={page.pageId} className="font-mono text-xs leading-6 text-slate-900">
+                    {page.pageName} ({page.pageId})
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] px-4 py-3 text-xs uppercase tracking-[0.14em] text-slate-500">
+                Meta returned no manageable Pages for the last OAuth attempt.
+              </p>
+            )}
+          </div>
+        ) : (
+          <p className="mt-4 text-sm leading-6 text-slate-700">
+            No Facebook OAuth debug information has been recorded for this
+            event yet. Run the connect flow once to capture what Meta returns.
+          </p>
+        )}
+      </div>
+
+      <div className="mt-4 rounded-2xl bg-white/70 p-4">
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
           3. Meta app checklist
         </p>
@@ -323,15 +404,18 @@ function parseTaskForm(formData: FormData) {
 
 export async function loader({ params, request }: Route.LoaderArgs) {
   try {
-    const [event, pendingFacebookConnection] = await Promise.all([
+    const [event, latestFacebookDebug, pendingFacebookConnection] =
+      await Promise.all([
       fetchAdminEvent(params.eventSlug, request),
+      fetchAdminFacebookConnectionDebug(params.eventSlug, request),
       fetchAdminFacebookPendingConnection(params.eventSlug, request),
-    ]);
+      ]);
     const url = new URL(request.url);
 
     return {
       connectStatus: url.searchParams.get("facebookConnect"),
       event,
+      latestFacebookDebug,
       pendingFacebookConnection,
     };
   } catch {
@@ -627,7 +711,8 @@ export default function AdminEventTasks({
   actionData,
   loaderData,
 }: Route.ComponentProps) {
-  const { connectStatus, event, pendingFacebookConnection } = loaderData;
+  const { connectStatus, event, latestFacebookDebug, pendingFacebookConnection } =
+    loaderData;
 
   return (
     <AdminShell
@@ -651,6 +736,7 @@ export default function AdminEventTasks({
           connectStatus={connectStatus}
           connection={event.facebookConnection}
           eventSlug={event.slug}
+          latestFacebookDebug={latestFacebookDebug}
           pendingConnection={pendingFacebookConnection}
         />
 

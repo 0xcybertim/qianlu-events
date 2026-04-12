@@ -581,6 +581,31 @@ function serializePendingFacebookConnection(
   };
 }
 
+function serializeFacebookOauthDebugState(
+  state: {
+    consumedAt: Date | null;
+    createdAt: Date;
+    expiresAt: Date;
+    pageOptionsJson: Prisma.JsonValue | null;
+    state: string;
+  } | null,
+) {
+  if (!state) {
+    return null;
+  }
+
+  return {
+    createdAt: state.createdAt.toISOString(),
+    consumedAt: state.consumedAt?.toISOString() ?? null,
+    expiresAt: state.expiresAt.toISOString(),
+    pages: parsePendingFacebookPageOptions(state.pageOptionsJson).map((page) => ({
+      pageId: page.pageId,
+      pageName: page.pageName,
+    })),
+    state: state.state,
+  };
+}
+
 async function findPendingFacebookOauthState(args: {
   adminAccountId: string;
   eventId: string;
@@ -593,6 +618,17 @@ async function findPendingFacebookOauthState(args: {
       expiresAt: {
         gt: new Date(),
       },
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+  });
+}
+
+async function findLatestFacebookOauthStateForEvent(eventId: string) {
+  return prisma.adminFacebookOAuthState.findFirst({
+    where: {
+      eventId,
     },
     orderBy: {
       createdAt: "desc",
@@ -1027,6 +1063,25 @@ export function registerAdminRoutes(app: FastifyInstance) {
     return serializePendingFacebookConnection(state);
   });
 
+  app.get<{
+    Params: { eventSlug: string };
+  }>("/admin/events/:eventSlug/facebook-connection/debug", async (request, reply) => {
+    const access = await requireEventAccess({
+      eventSlug: request.params.eventSlug,
+      minRole: "EDITOR",
+      reply,
+      request,
+    });
+
+    if (!access || "message" in access) {
+      return access ?? { message: "Admin authentication required." };
+    }
+
+    return serializeFacebookOauthDebugState(
+      await findLatestFacebookOauthStateForEvent(access.event.id),
+    );
+  });
+
   app.post<{ Params: { eventSlug: string } }>(
     "/admin/events/:eventSlug/facebook-connection/select",
     async (request, reply) => {
@@ -1233,7 +1288,7 @@ export function registerAdminRoutes(app: FastifyInstance) {
           },
           data: {
             consumedAt: new Date(),
-            pageOptionsJson: Prisma.JsonNull,
+            pageOptionsJson: [] as Prisma.InputJsonValue,
           },
         });
 
@@ -1268,7 +1323,7 @@ export function registerAdminRoutes(app: FastifyInstance) {
             },
             data: {
               consumedAt: new Date(),
-              pageOptionsJson: Prisma.JsonNull,
+              pageOptionsJson: pages as Prisma.InputJsonValue,
             },
           }),
         ]);
