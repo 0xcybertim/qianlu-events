@@ -26,6 +26,7 @@ import {
 import {
   buildFacebookOAuthUrl,
   exchangeFacebookCodeForUserAccessToken,
+  fetchFacebookGrantedPermissions,
   fetchFacebookManagedPages,
 } from "../lib/facebook.js";
 import { prisma } from "../lib/prisma.js";
@@ -1397,6 +1398,28 @@ export function registerAdminRoutes(app: FastifyInstance) {
         code: request.query.code,
         redirectUri: getFacebookOAuthRedirectUri(),
       });
+      try {
+        const grantedPermissions =
+          await fetchFacebookGrantedPermissions(userAccessToken);
+
+        request.log.info(
+          {
+            eventId: oauthState.eventId,
+            grantedPermissions,
+            state: stateValue ?? null,
+          },
+          "Facebook OAuth granted permissions.",
+        );
+      } catch (error) {
+        request.log.warn(
+          {
+            error: error instanceof Error ? error.message : String(error),
+            eventId: oauthState.eventId,
+            state: stateValue ?? null,
+          },
+          "Could not read Facebook OAuth granted permissions.",
+        );
+      }
       const {
         discoveryLogs,
         discoveryWarnings,

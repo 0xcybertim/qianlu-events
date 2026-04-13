@@ -34,6 +34,11 @@ type FacebookOAuthTokenResponse = {
   access_token?: string;
 };
 
+type FacebookPermissionStatus = {
+  permission?: string;
+  status?: string;
+};
+
 type FacebookManagedPage = {
   access_token?: string;
   id?: string;
@@ -108,6 +113,23 @@ export type FacebookManagedPageDiscoveryLog = {
   pageId: string | null;
   pageName: string | null;
 };
+
+export async function fetchFacebookGrantedPermissions(userAccessToken: string) {
+  const response = await facebookGraphRequest<{
+    data?: FacebookPermissionStatus[];
+  }>("/me/permissions", userAccessToken, {
+    limit: "200",
+  });
+
+  return (response?.data ?? [])
+    .filter((item): item is Required<Pick<FacebookPermissionStatus, "permission" | "status">> =>
+      typeof item.permission === "string" && typeof item.status === "string",
+    )
+    .map((item) => ({
+      permission: item.permission,
+      status: item.status,
+    }));
+}
 
 type FacebookManagedPageDiscoveryTrace = {
   businessId?: string | null;
