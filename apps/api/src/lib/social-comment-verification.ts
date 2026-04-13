@@ -37,6 +37,20 @@ type TaskAttemptRecord = {
   taskId: string;
 };
 
+function logFacebookCommentVerification(
+  event: string,
+  data: Record<string, unknown>,
+) {
+  console.info(
+    JSON.stringify({
+      event,
+      scope: "facebook-comment-verification",
+      time: Date.now(),
+      ...data,
+    }),
+  );
+}
+
 function getProofObject(value: Prisma.JsonValue | null) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return {} as Record<string, unknown>;
@@ -391,6 +405,14 @@ export function isAutoVerifiableFacebookCommentTask(task: {
 export async function processFacebookCommentEvent(
   commentEvent: FacebookCommentEvent,
 ) {
+  logFacebookCommentVerification("webhook_received", {
+    commentId: commentEvent.commentId,
+    hasMessage: Boolean(commentEvent.message),
+    pageId: commentEvent.pageId ?? null,
+    parentId: commentEvent.parentId ?? null,
+    postId: commentEvent.postId ?? null,
+  });
+
   const enrichedEvent =
     !commentEvent.message || !commentEvent.postId
       ? await enrichFacebookCommentEvent(
@@ -399,7 +421,20 @@ export async function processFacebookCommentEvent(
         )
       : commentEvent;
 
+  logFacebookCommentVerification("webhook_enriched", {
+    commentId: enrichedEvent.commentId,
+    hasMessage: Boolean(enrichedEvent.message),
+    pageId: enrichedEvent.pageId ?? null,
+    postId: enrichedEvent.postId ?? null,
+  });
+
   if (!enrichedEvent.postId || !enrichedEvent.message) {
+    logFacebookCommentVerification("webhook_missing_message_or_post", {
+      commentId: enrichedEvent.commentId,
+      pageId: enrichedEvent.pageId ?? null,
+      postId: enrichedEvent.postId ?? null,
+    });
+
     await saveSocialCommentVerification({
       commentEvent: enrichedEvent,
       matched: false,
@@ -413,6 +448,13 @@ export async function processFacebookCommentEvent(
 
   const tasks = await loadFacebookCommentTasksForPost(enrichedEvent.postId);
 
+  logFacebookCommentVerification("webhook_tasks_loaded", {
+    commentId: enrichedEvent.commentId,
+    postId: enrichedEvent.postId,
+    taskCount: tasks.length,
+    taskIds: tasks.map((task) => task.id),
+  });
+
   for (const task of tasks) {
     const match = await findTaskAttemptForComment({
       commentEvent: enrichedEvent,
@@ -420,6 +462,12 @@ export async function processFacebookCommentEvent(
     });
 
     if (!match) {
+      logFacebookCommentVerification("webhook_task_no_match", {
+        commentId: enrichedEvent.commentId,
+        postId: enrichedEvent.postId,
+        taskId: task.id,
+      });
+
       continue;
     }
 
@@ -429,6 +477,15 @@ export async function processFacebookCommentEvent(
       source: "facebook-webhook",
       task,
       taskAttempt: match.taskAttempt,
+      verificationCode: match.verificationCode,
+    });
+
+    logFacebookCommentVerification("webhook_task_match", {
+      commentId: enrichedEvent.commentId,
+      postId: enrichedEvent.postId,
+      taskAttemptId: match.taskAttempt.id,
+      taskId: task.id,
+      verified,
       verificationCode: match.verificationCode,
     });
 
@@ -442,6 +499,11 @@ export async function processFacebookCommentEvent(
   await saveSocialCommentVerification({
     commentEvent: enrichedEvent,
     matched: false,
+  });
+
+  logFacebookCommentVerification("webhook_unmatched_saved", {
+    commentId: enrichedEvent.commentId,
+    postId: enrichedEvent.postId,
   });
 
   return {
@@ -471,6 +533,15 @@ export async function awaitFacebookCommentVerification(args: {
     throw new Error("Task could not build a required Facebook comment string.");
   }
 
+  logFacebookCommentVerification("await_requested", {
+    participantSessionId: args.participantSessionId,
+    taskAttemptId: args.taskAttemptId,
+    taskId: args.task.id,
+    expectedCommentText,
+    facebookPostId: config.facebookPostId,
+    pageId: args.task.facebookConnection?.pageId ?? null,
+  });
+
   const existingAttempt = await prisma.taskAttempt.findUniqueOrThrow({
     where: { id: args.taskAttemptId },
   });
@@ -496,24 +567,50 @@ export async function awaitFacebookCommentVerification(args: {
     where: { id: args.taskAttemptId },
   });
 
-  const pendingEvent = await prisma.socialCommentVerification.findFirst({
+  const pendingEvents = await prisma.socialCommentVerification.findMany({
     where: {
       matched: false,
-      taskAttemptId: pendingAttempt.id,
+      OR: [
+        {
+          taskAttemptId: pendingAttempt.id,
+        },
+        {
+          externalPostId: config.facebookPostId,
+        },
+      ],
     },
     orderBy: {
       createdAt: "desc",
     },
+    take: 20,
   });
 
-  if (
-    pendingEvent?.externalPostId === config.facebookPostId &&
-    pendingEvent.commentText &&
-    matchesFacebookCommentText({
-      actualCommentText: pendingEvent.commentText,
-      expectedCommentText,
-    })
-  ) {
+  const pendingEvent = pendingEvents.find(
+    (event) =>
+      event.commentText &&
+      event.externalPostId === config.facebookPostId &&
+      matchesFacebookCommentText({
+        actualCommentText: event.commentText,
+        expectedCommentText,
+      }),
+  );
+
+  logFacebookCommentVerification("await_pending_event_lookup", {
+    candidateCount: pendingEvents.length,
+    foundPendingEvent: Boolean(pendingEvent),
+    participantSessionId: args.participantSessionId,
+    pendingEventCommentId: pendingEvent?.externalCommentId ?? null,
+    pendingEventPostId: pendingEvent?.externalPostId ?? null,
+    taskAttemptId: pendingAttempt.id,
+  });
+
+  if (pendingEvent?.commentText && pendingEvent.externalPostId === config.facebookPostId) {
+    logFacebookCommentVerification("await_pending_event_matched", {
+      participantSessionId: args.participantSessionId,
+      pendingEventCommentId: pendingEvent.externalCommentId,
+      taskAttemptId: pendingAttempt.id,
+    });
+
     await verifyMatchedTaskAttempt({
       commentEvent: {
         commentId: pendingEvent.externalCommentId,
@@ -539,8 +636,22 @@ export async function awaitFacebookCommentVerification(args: {
       args.task.facebookConnection?.pageAccessToken ?? null,
     );
   } catch {
+    logFacebookCommentVerification("await_graph_lookup_failed", {
+      facebookPostId: config.facebookPostId,
+      pageId: args.task.facebookConnection?.pageId ?? null,
+      participantSessionId: args.participantSessionId,
+      taskAttemptId: pendingAttempt.id,
+    });
+
     return recalculateSessionState(args.participantSessionId);
   }
+
+  logFacebookCommentVerification("await_graph_lookup_completed", {
+    commentCount: comments.length,
+    facebookPostId: config.facebookPostId,
+    participantSessionId: args.participantSessionId,
+    taskAttemptId: pendingAttempt.id,
+  });
 
   const matchedComment = comments.find(
     (comment) =>
@@ -552,8 +663,25 @@ export async function awaitFacebookCommentVerification(args: {
   );
 
   if (!matchedComment?.message) {
+    logFacebookCommentVerification("await_graph_lookup_no_match", {
+      facebookPostId: config.facebookPostId,
+      participantSessionId: args.participantSessionId,
+      sampleComments: comments.slice(0, 5).map((comment) => ({
+        id: comment.id,
+        message: comment.message ?? null,
+      })),
+      taskAttemptId: pendingAttempt.id,
+    });
+
     return recalculateSessionState(args.participantSessionId);
   }
+
+  logFacebookCommentVerification("await_graph_lookup_match", {
+    commentId: matchedComment.id,
+    facebookPostId: config.facebookPostId,
+    participantSessionId: args.participantSessionId,
+    taskAttemptId: pendingAttempt.id,
+  });
 
   await verifyMatchedTaskAttempt({
     commentEvent: {

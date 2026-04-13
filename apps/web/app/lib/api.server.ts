@@ -2,6 +2,7 @@ import { data } from "react-router";
 
 import {
   adminEventDetailSchema,
+  adminFacebookCommentDebugResponseSchema,
   adminFacebookConnectionDebugSchema,
   adminEventsResponseSchema,
   adminFacebookPendingConnectionSchema,
@@ -276,6 +277,18 @@ export async function fetchAdminFacebookConnectionDebug(
   return adminFacebookConnectionDebugSchema
     .nullable()
     .parse(await response.json());
+}
+
+export async function fetchAdminFacebookCommentDebug(
+  eventSlug: string,
+  request?: Request,
+) {
+  const response = await apiRequest({
+    path: `/admin/events/${encodeURIComponent(eventSlug)}/facebook-comment-debug`,
+    request,
+  });
+
+  return adminFacebookCommentDebugResponseSchema.parse(await response.json());
 }
 
 export async function selectAdminFacebookConnection(

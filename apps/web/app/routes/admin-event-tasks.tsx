@@ -7,6 +7,7 @@ import {
   createAdminTask,
   disableAdminTask,
   fetchAdminEvent,
+  fetchAdminFacebookCommentDebug,
   fetchAdminFacebookConnectionDebug,
   fetchAdminFacebookPendingConnection,
   selectAdminFacebookConnection,
@@ -817,17 +818,24 @@ function parseTaskForm(formData: FormData) {
 
 export async function loader({ params, request }: Route.LoaderArgs) {
   try {
-    const [event, latestFacebookDebug, pendingFacebookConnection] =
+    const [
+      event,
+      facebookCommentDebug,
+      latestFacebookDebug,
+      pendingFacebookConnection,
+    ] =
       await Promise.all([
-      fetchAdminEvent(params.eventSlug, request),
-      fetchAdminFacebookConnectionDebug(params.eventSlug, request),
-      fetchAdminFacebookPendingConnection(params.eventSlug, request),
+        fetchAdminEvent(params.eventSlug, request),
+        fetchAdminFacebookCommentDebug(params.eventSlug, request),
+        fetchAdminFacebookConnectionDebug(params.eventSlug, request),
+        fetchAdminFacebookPendingConnection(params.eventSlug, request),
       ]);
     const url = new URL(request.url);
 
     return {
       connectStatus: url.searchParams.get("facebookConnect"),
       event,
+      facebookCommentDebug,
       latestFacebookDebug,
       pendingFacebookConnection,
     };
@@ -1254,11 +1262,293 @@ function TaskForm({
   );
 }
 
+function FacebookCommentTaskDebugPanel({
+  taskDebug,
+}: {
+  taskDebug?: {
+    autoVerify: boolean;
+    connectedPageId: string | null;
+    connectedPageMatchesPostIdPrefix: boolean | null;
+    connectedPageName: string | null;
+    facebookPostId: string;
+    pendingAttemptCount: number;
+    primaryUrl: string | null;
+    recentAttempts: {
+      awaitingAutoVerificationAt: string | null;
+      expectedCommentText: string | null;
+      matchedCommentId: string | null;
+      matchedCommentText: string | null;
+      participantEmail: string | null;
+      participantName: string | null;
+      participantSessionId: string;
+      source: string | null;
+      status: string;
+      taskAttemptId: string;
+      updatedAt: string;
+      verificationCode: string;
+      verifiedAutomaticallyAt: string | null;
+    }[];
+    recentComments: {
+      commentText: string | null;
+      createdAt: string;
+      externalCommentId: string;
+      externalPostId: string | null;
+      matched: boolean;
+      participantSessionId: string | null;
+      participantVerificationCode: string | null;
+      processedAt: string | null;
+      taskAttemptId: string | null;
+    }[];
+    requiredPrefix: string;
+    requireVerificationCode: boolean;
+    taskId: string;
+    taskTitle: string;
+    unmatchedCommentCount: number;
+    verifiedAttemptCount: number;
+  };
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+
+  if (!taskDebug) {
+    return null;
+  }
+
+  const mismatchTone =
+    taskDebug.connectedPageMatchesPostIdPrefix === false
+      ? "bg-rose-50 border-rose-200 text-rose-900"
+      : "bg-[var(--color-surface-strong)] border-[var(--color-border)] text-slate-700";
+
+  return (
+    <div className="mt-4 rounded-2xl bg-white/70 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+            Facebook verification debug
+          </p>
+          <p className="mt-2 text-sm leading-6 text-slate-700">
+            Inspect recent waiting attempts, matched comments, and post wiring
+            for this Facebook comment task.
+          </p>
+        </div>
+        <button
+          className="inline-flex min-h-11 items-center justify-center rounded-full border border-[var(--color-border)] bg-white px-4 py-2 text-sm font-semibold text-slate-900 transition-colors hover:bg-slate-50"
+          onClick={() => setIsOpen((value) => !value)}
+          type="button"
+        >
+          {isOpen ? "Hide verification debug" : "Show verification debug"}
+        </button>
+      </div>
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+        <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+            Waiting attempts
+          </p>
+          <p className="mt-2 text-2xl font-semibold text-slate-950">
+            {taskDebug.pendingAttemptCount}
+          </p>
+        </div>
+        <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+            Verified attempts
+          </p>
+          <p className="mt-2 text-2xl font-semibold text-slate-950">
+            {taskDebug.verifiedAttemptCount}
+          </p>
+        </div>
+        <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+            Unmatched comments
+          </p>
+          <p className="mt-2 text-2xl font-semibold text-slate-950">
+            {taskDebug.unmatchedCommentCount}
+          </p>
+        </div>
+      </div>
+
+      {isOpen ? (
+        <div className="mt-4 space-y-4">
+          <div className={`rounded-2xl border p-4 text-sm leading-6 ${mismatchTone}`}>
+            <p>
+              Connected Page:{" "}
+              <span className="font-semibold text-slate-950">
+                {taskDebug.connectedPageName ?? "Not connected"}
+              </span>
+              {taskDebug.connectedPageId
+                ? ` (${taskDebug.connectedPageId})`
+                : ""}
+            </p>
+            <p>
+              Facebook post ID:{" "}
+              <code>{taskDebug.facebookPostId}</code>
+            </p>
+            <p>
+              Required prefix: <code>{taskDebug.requiredPrefix}</code>
+            </p>
+            {taskDebug.primaryUrl ? (
+              <p>
+                Task post URL:{" "}
+                <a className="underline" href={taskDebug.primaryUrl} rel="noreferrer" target="_blank">
+                  {taskDebug.primaryUrl}
+                </a>
+              </p>
+            ) : null}
+            <p>
+              Expected connected Page match:{" "}
+              {taskDebug.connectedPageMatchesPostIdPrefix === null
+                ? "Could not compare"
+                : taskDebug.connectedPageMatchesPostIdPrefix
+                  ? "yes"
+                  : "no, the post ID prefix does not match the connected Page"}
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-4">
+            <p className="text-sm font-semibold text-slate-900">
+              How to read this
+            </p>
+            <ol className="mt-3 space-y-2 text-sm leading-6 text-slate-700">
+              <li>1. If waiting attempts go up but recent comments stay empty, the webhook is not arriving and the Graph lookup is not finding the comment.</li>
+              <li>2. If recent comments appear but remain unmatched, compare the stored comment text against the expected comment text in recent attempts.</li>
+              <li>3. If the connected Page does not match the post ID prefix, the task is watching the wrong Page/post combination.</li>
+            </ol>
+          </div>
+
+          <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-4">
+            <p className="text-sm font-semibold text-slate-900">
+              Recent waiting and verified attempts
+            </p>
+            {taskDebug.recentAttempts.length > 0 ? (
+              <ul className="mt-3 space-y-3">
+                {taskDebug.recentAttempts.map((attempt) => (
+                  <li
+                    key={attempt.taskAttemptId}
+                    className="rounded-xl bg-white px-4 py-3 text-sm leading-6 text-slate-700"
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <StatusBadge
+                        label={attempt.status}
+                        tone={
+                          attempt.status === "VERIFIED"
+                            ? "verified"
+                            : "warning"
+                        }
+                      />
+                      <span className="font-semibold text-slate-900">
+                        {attempt.participantName ?? "Anonymous participant"}
+                      </span>
+                      <span className="text-slate-500">
+                        {attempt.verificationCode}
+                      </span>
+                    </div>
+                    <p className="mt-2">
+                      Expected comment:{" "}
+                      <code>{attempt.expectedCommentText ?? "not stored"}</code>
+                    </p>
+                    {attempt.matchedCommentText ? (
+                      <p>
+                        Matched comment: <code>{attempt.matchedCommentText}</code>
+                      </p>
+                    ) : null}
+                    <p>
+                      Awaiting since:{" "}
+                      {attempt.awaitingAutoVerificationAt
+                        ? new Intl.DateTimeFormat("en", {
+                            dateStyle: "medium",
+                            timeStyle: "short",
+                          }).format(new Date(attempt.awaitingAutoVerificationAt))
+                        : "not recorded"}
+                    </p>
+                    <p>
+                      Last updated:{" "}
+                      {new Intl.DateTimeFormat("en", {
+                        dateStyle: "medium",
+                        timeStyle: "short",
+                      }).format(new Date(attempt.updatedAt))}
+                    </p>
+                    {attempt.source ? <p>Verification source: {attempt.source}</p> : null}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-3 text-sm leading-6 text-slate-700">
+                No recent waiting or verified attempts have been recorded for
+                this task yet.
+              </p>
+            )}
+          </div>
+
+          <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-4">
+            <p className="text-sm font-semibold text-slate-900">
+              Recent webhook and comment records
+            </p>
+            {taskDebug.recentComments.length > 0 ? (
+              <ul className="mt-3 space-y-3">
+                {taskDebug.recentComments.map((comment) => (
+                  <li
+                    key={comment.externalCommentId}
+                    className="rounded-xl bg-white px-4 py-3 text-sm leading-6 text-slate-700"
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <StatusBadge
+                        label={comment.matched ? "MATCHED" : "UNMATCHED"}
+                        tone={comment.matched ? "verified" : "warning"}
+                      />
+                      <span className="font-mono text-xs text-slate-500">
+                        {comment.externalCommentId}
+                      </span>
+                    </div>
+                    <p className="mt-2">
+                      Comment text:{" "}
+                      <code>{comment.commentText ?? "missing from webhook payload"}</code>
+                    </p>
+                    <p>
+                      Post ID: <code>{comment.externalPostId ?? "unknown"}</code>
+                    </p>
+                    <p>
+                      Received:{" "}
+                      {new Intl.DateTimeFormat("en", {
+                        dateStyle: "medium",
+                        timeStyle: "short",
+                      }).format(new Date(comment.createdAt))}
+                    </p>
+                    {comment.participantVerificationCode ? (
+                      <p>
+                        Linked participant code:{" "}
+                        <code>{comment.participantVerificationCode}</code>
+                      </p>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-3 text-sm leading-6 text-slate-700">
+                No webhook/comment records have been stored for this post yet.
+              </p>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="mt-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] px-4 py-3 text-sm leading-6 text-slate-700">
+          Open this only when you need to debug why a Facebook comment task is
+          staying in the waiting state.
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function AdminEventTasks({
   actionData,
   loaderData,
 }: Route.ComponentProps) {
-  const { connectStatus, event, latestFacebookDebug, pendingFacebookConnection } =
+  const {
+    connectStatus,
+    event,
+    facebookCommentDebug,
+    latestFacebookDebug,
+    pendingFacebookConnection,
+  } =
     loaderData;
 
   return (
@@ -1327,6 +1617,15 @@ export default function AdminEventTasks({
                 </div>
               </div>
               <TaskForm buttonLabel="Save task" intent="update" task={task} />
+              {task.type === "SOCIAL_COMMENT" &&
+              task.platform === "FACEBOOK" &&
+              task.configJson?.autoVerify ? (
+                <FacebookCommentTaskDebugPanel
+                  taskDebug={facebookCommentDebug.tasks.find(
+                    (entry) => entry.taskId === task.id,
+                  )}
+                />
+              ) : null}
               {task.isActive ? (
                 <Form className="mt-3" method="post">
                   <input name="intent" type="hidden" value="disable" />

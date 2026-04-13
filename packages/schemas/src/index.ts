@@ -417,6 +417,56 @@ export const adminFacebookConnectionDebugSchema = z.object({
   state: z.string(),
 });
 
+export const adminFacebookCommentTaskDebugSchema = z.object({
+  taskId: z.string(),
+  taskTitle: z.string(),
+  connectedPageId: z.string().nullable(),
+  connectedPageMatchesPostIdPrefix: z.boolean().nullable(),
+  connectedPageName: z.string().nullable(),
+  facebookPostId: z.string(),
+  primaryUrl: z.string().nullable(),
+  requiredPrefix: z.string(),
+  autoVerify: z.boolean(),
+  requireVerificationCode: z.boolean(),
+  pendingAttemptCount: z.number().int().nonnegative(),
+  verifiedAttemptCount: z.number().int().nonnegative(),
+  unmatchedCommentCount: z.number().int().nonnegative(),
+  recentAttempts: z.array(
+    z.object({
+      awaitingAutoVerificationAt: z.string().nullable(),
+      expectedCommentText: z.string().nullable(),
+      matchedCommentId: z.string().nullable(),
+      matchedCommentText: z.string().nullable(),
+      participantEmail: z.string().nullable(),
+      participantName: z.string().nullable(),
+      participantSessionId: z.string(),
+      source: z.string().nullable(),
+      status: taskAttemptStatusSchema,
+      taskAttemptId: z.string(),
+      updatedAt: z.string(),
+      verificationCode: z.string(),
+      verifiedAutomaticallyAt: z.string().nullable(),
+    }),
+  ),
+  recentComments: z.array(
+    z.object({
+      commentText: z.string().nullable(),
+      createdAt: z.string(),
+      externalCommentId: z.string(),
+      externalPostId: z.string().nullable(),
+      matched: z.boolean(),
+      participantSessionId: z.string().nullable(),
+      participantVerificationCode: z.string().nullable(),
+      processedAt: z.string().nullable(),
+      taskAttemptId: z.string().nullable(),
+    }),
+  ),
+});
+
+export const adminFacebookCommentDebugResponseSchema = z.object({
+  tasks: z.array(adminFacebookCommentTaskDebugSchema),
+});
+
 export const adminParticipantStatusCountsSchema = z.record(
   taskAttemptStatusSchema,
   z.number().int().nonnegative(),
@@ -550,6 +600,9 @@ export type AdminEventDetail = z.infer<typeof adminEventDetailSchema>;
 export type AdminTask = z.infer<typeof adminTaskSchema>;
 export type AdminFacebookConnection = z.infer<
   typeof adminFacebookConnectionSchema
+>;
+export type AdminFacebookCommentDebugResponse = z.infer<
+  typeof adminFacebookCommentDebugResponseSchema
 >;
 export type AdminParticipant = z.infer<typeof adminParticipantSchema>;
 export type AdminLead = z.infer<typeof adminLeadSchema>;

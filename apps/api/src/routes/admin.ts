@@ -3,6 +3,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { Prisma, type AdminRole } from "@prisma/client";
 import { ADMIN_SESSION_COOKIE_NAME } from "@qianlu-events/config";
+import { getFacebookCommentTaskConfig } from "@qianlu-events/domain";
 import {
   adminAuthLoginBodySchema,
   adminFacebookConnectionSelectBodySchema,
@@ -230,6 +231,28 @@ function getProofBoolean(proofJson: unknown, key: string) {
   const value = proof?.[key];
 
   return typeof value === "boolean" ? value : null;
+}
+
+function getSocialCommentProof(proofJson: unknown) {
+  const proof = getProofObject(proofJson);
+  const socialComment = proof?.socialComment;
+
+  if (
+    !socialComment ||
+    typeof socialComment !== "object" ||
+    Array.isArray(socialComment)
+  ) {
+    return null;
+  }
+
+  return socialComment as Record<string, unknown>;
+}
+
+function getProofString(proofJson: unknown, key: string) {
+  const proof = getSocialCommentProof(proofJson);
+  const value = proof?.[key];
+
+  return typeof value === "string" ? value : null;
 }
 
 function toStatusCounts(
@@ -1175,6 +1198,183 @@ export function registerAdminRoutes(app: FastifyInstance) {
     return serializeFacebookOauthDebugState(
       await findLatestFacebookOauthStateForEvent(access.event.id),
     );
+  });
+
+  app.get<{
+    Params: { eventSlug: string };
+  }>("/admin/events/:eventSlug/facebook-comment-debug", async (request, reply) => {
+    const access = await requireEventAccess({
+      eventSlug: request.params.eventSlug,
+      minRole: "VIEWER",
+      reply,
+      request,
+    });
+
+    if (!access || "message" in access) {
+      return access ?? { tasks: [] };
+    }
+
+    const facebookTasks = access.event.tasks
+      .map((task) => ({
+        config: getFacebookCommentTaskConfig(task),
+        task,
+      }))
+      .filter(
+        (
+          entry,
+        ): entry is {
+          config: NonNullable<ReturnType<typeof getFacebookCommentTaskConfig>>;
+          task: (typeof access.event.tasks)[number];
+        } =>
+          Boolean(
+            entry.config &&
+              entry.task.type === "SOCIAL_COMMENT" &&
+              entry.task.platform === "FACEBOOK" &&
+              entry.config.autoVerify,
+          ),
+      );
+
+    const tasks = await Promise.all(
+      facebookTasks.map(async ({ config, task }) => {
+        const [pendingAttemptCount, verifiedAttemptCount, unmatchedCommentCount, recentAttempts, recentComments] =
+          await Promise.all([
+            prisma.taskAttempt.count({
+              where: {
+                status: "PENDING_AUTO_VERIFICATION",
+                taskId: task.id,
+              },
+            }),
+            prisma.taskAttempt.count({
+              where: {
+                status: "VERIFIED",
+                taskId: task.id,
+              },
+            }),
+            prisma.socialCommentVerification.count({
+              where: {
+                externalPostId: config.facebookPostId,
+                matched: false,
+                platform: "FACEBOOK",
+              },
+            }),
+            prisma.taskAttempt.findMany({
+              where: {
+                taskId: task.id,
+                status: {
+                  in: ["PENDING_AUTO_VERIFICATION", "VERIFIED"],
+                },
+              },
+              include: {
+                participantSession: {
+                  select: {
+                    email: true,
+                    id: true,
+                    name: true,
+                    verificationCode: true,
+                  },
+                },
+              },
+              orderBy: {
+                updatedAt: "desc",
+              },
+              take: 10,
+            }),
+            prisma.socialCommentVerification.findMany({
+              where: {
+                platform: "FACEBOOK",
+                OR: [
+                  {
+                    externalPostId: config.facebookPostId,
+                  },
+                  {
+                    taskId: task.id,
+                  },
+                ],
+              },
+              include: {
+                participantSession: {
+                  select: {
+                    verificationCode: true,
+                  },
+                },
+              },
+              orderBy: {
+                createdAt: "desc",
+              },
+              take: 10,
+            }),
+          ]);
+
+        const postIdPrefix = config.facebookPostId.includes("_")
+          ? config.facebookPostId.split("_")[0]
+          : null;
+
+        return {
+          autoVerify: config.autoVerify,
+          connectedPageId: access.event.facebookConnection?.pageId ?? null,
+          connectedPageMatchesPostIdPrefix:
+            access.event.facebookConnection?.pageId && postIdPrefix
+              ? access.event.facebookConnection.pageId === postIdPrefix
+              : null,
+          connectedPageName: access.event.facebookConnection?.pageName ?? null,
+          facebookPostId: config.facebookPostId,
+          pendingAttemptCount,
+          primaryUrl: config.primaryUrl ?? null,
+          recentAttempts: recentAttempts.map((attempt) => ({
+            awaitingAutoVerificationAt: getProofString(
+              attempt.proofJson,
+              "awaitingAutoVerificationAt",
+            ),
+            expectedCommentText: getProofString(
+              attempt.proofJson,
+              "expectedCommentText",
+            ),
+            matchedCommentId: getProofString(
+              attempt.proofJson,
+              "matchedCommentId",
+            ),
+            matchedCommentText: getProofString(
+              attempt.proofJson,
+              "matchedCommentText",
+            ),
+            participantEmail: attempt.participantSession.email,
+            participantName: attempt.participantSession.name,
+            participantSessionId: attempt.participantSession.id,
+            source: getProofString(attempt.proofJson, "source"),
+            status: attempt.status,
+            taskAttemptId: attempt.id,
+            updatedAt: attempt.updatedAt.toISOString(),
+            verificationCode: attempt.participantSession.verificationCode,
+            verifiedAutomaticallyAt: getProofString(
+              attempt.proofJson,
+              "verifiedAutomaticallyAt",
+            ),
+          })),
+          recentComments: recentComments.map((comment) => ({
+            commentText: comment.commentText,
+            createdAt: comment.createdAt.toISOString(),
+            externalCommentId: comment.externalCommentId,
+            externalPostId: comment.externalPostId,
+            matched: comment.matched,
+            participantSessionId: comment.participantSessionId,
+            participantVerificationCode:
+              comment.participantSession?.verificationCode ?? null,
+            processedAt: serializeDate(comment.processedAt),
+            taskAttemptId: comment.taskAttemptId,
+          })),
+          requiredPrefix: config.requiredPrefix,
+          requireVerificationCode: config.requireVerificationCode,
+          taskId: task.id,
+          taskTitle: task.title,
+          unmatchedCommentCount,
+          verifiedAttemptCount,
+        };
+      }),
+    );
+
+    return {
+      tasks,
+    };
   });
 
   app.post<{ Params: { eventSlug: string } }>(
