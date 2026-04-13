@@ -1,5 +1,5 @@
 import { Button, StatusBadge } from "@qianlu-events/ui";
-import { Form, redirect } from "react-router";
+import { Form, redirect, useNavigation } from "react-router";
 import { useState } from "react";
 
 import type { Route } from "./+types/admin-event-tasks";
@@ -818,6 +818,25 @@ function parseTaskForm(formData: FormData) {
   };
 }
 
+function extractActionErrorMessage(error: unknown) {
+  if (error && typeof error === "object") {
+    const candidate = error as {
+      data?: { message?: unknown };
+      message?: unknown;
+    };
+
+    if (typeof candidate.data?.message === "string") {
+      return candidate.data.message;
+    }
+
+    if (typeof candidate.message === "string") {
+      return candidate.message;
+    }
+  }
+
+  return "Could not save task. Check the Facebook connection and required fields.";
+}
+
 export async function loader({ params, request }: Route.LoaderArgs) {
   try {
     const [
@@ -851,6 +870,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
 
 export async function action({ params, request }: Route.ActionArgs) {
   const formData = await request.formData();
+  const formKey = formData.get("formKey")?.toString() ?? "";
   const intent = formData.get("intent")?.toString() ?? "";
   const taskId = formData.get("taskId")?.toString() ?? "";
 
@@ -859,6 +879,7 @@ export async function action({ params, request }: Route.ActionArgs) {
       await createAdminTask(params.eventSlug, parseTaskForm(formData), request);
 
       return {
+        formKey,
         success: "Task created.",
       };
     }
@@ -867,6 +888,7 @@ export async function action({ params, request }: Route.ActionArgs) {
       await disableAdminTask(params.eventSlug, taskId, request);
 
       return {
+        formKey,
         success: "Task disabled.",
       };
     }
@@ -880,6 +902,7 @@ export async function action({ params, request }: Route.ActionArgs) {
       );
 
       return {
+        formKey,
         success: "Task saved.",
       };
     }
@@ -894,26 +917,31 @@ export async function action({ params, request }: Route.ActionArgs) {
       );
 
       return {
+        formKey,
         success: "Facebook Page connected.",
       };
     }
-  } catch {
+  } catch (error) {
     return {
-      error: "Could not save task. Check the Facebook connection and required fields.",
+      formKey,
+      error: extractActionErrorMessage(error),
     };
   }
 
   return {
+    formKey,
     error: "Choose a task action.",
   };
 }
 
 function TaskForm({
+  actionData,
   buttonLabel,
   facebookPostOptions,
   intent,
   task,
 }: {
+  actionData?: { error?: string; formKey?: string; success?: string } | null;
   buttonLabel: string;
   facebookPostOptions: {
     error: string | null;
@@ -955,7 +983,9 @@ function TaskForm({
     } | null;
   };
 }) {
+  const navigation = useNavigation();
   const initialType = task?.type ?? "SOCIAL_FOLLOW";
+  const formKey = task ? `task-${task.id}` : "task-create";
   const initialGuide = getTaskTypeGuide(initialType);
   const [selectedType, setSelectedType] = useState(initialType);
   const currentGuide = getTaskTypeGuide(selectedType);
@@ -1013,6 +1043,11 @@ function TaskForm({
       ? selectedFacebookPage?.posts.find((post) => post.postId === selectedFacebookPostId) ??
         null
       : null;
+  const activeFormKey = navigation.formData?.get("formKey")?.toString() ?? "";
+  const isSubmittingThisForm =
+    activeFormKey === formKey && navigation.state !== "idle";
+  const isCurrentFormResult =
+    actionData?.formKey === formKey && (actionData.success || actionData.error);
 
   function handleTypeChange(nextType: string) {
     const nextGuide = getTaskTypeGuide(nextType);
@@ -1053,6 +1088,7 @@ function TaskForm({
 
   return (
     <Form className="space-y-4" method="post">
+      <input name="formKey" type="hidden" value={formKey} />
       <input name="intent" type="hidden" value={intent} />
       {task ? <input name="taskId" type="hidden" value={task.id} /> : null}
       <div className="rounded-2xl bg-white/70 p-4">
@@ -1468,7 +1504,23 @@ function TaskForm({
           </label>
         </div>
       ) : null}
-      <Button type="submit">{buttonLabel}</Button>
+      {isCurrentFormResult && actionData?.error ? (
+        <p className="rounded-lg bg-rose-100 px-4 py-3 text-sm font-medium text-rose-800">
+          {actionData.error}
+        </p>
+      ) : null}
+      {isCurrentFormResult && actionData?.success ? (
+        <p className="rounded-lg bg-emerald-100 px-4 py-3 text-sm font-medium text-emerald-800">
+          {actionData.success}
+        </p>
+      ) : null}
+      <Button disabled={isSubmittingThisForm} type="submit">
+        {isSubmittingThisForm
+          ? intent === "create"
+            ? "Creating..."
+            : "Saving..."
+          : buttonLabel}
+      </Button>
     </Form>
   );
 }
@@ -1482,6 +1534,18 @@ function FacebookCommentTaskDebugPanel({
     connectedPageMatchesPostIdPrefix: boolean | null;
     connectedPageName: string | null;
     facebookPostId: string;
+    liveCommentCount: number;
+    liveComments: {
+      commentId: string;
+      createdAt: string | null;
+      matchingAttemptIds: string[];
+      matchingExpectedCommentTexts: string[];
+      matchingVerificationCodes: string[];
+      message: string | null;
+      normalizedMessage: string | null;
+      parentId: string | null;
+    }[];
+    liveLookupError: string | null;
     pendingAttemptCount: number;
     primaryUrl: string | null;
     recentAttempts: {
@@ -1620,9 +1684,86 @@ function FacebookCommentTaskDebugPanel({
             </p>
             <ol className="mt-3 space-y-2 text-sm leading-6 text-slate-700">
               <li>1. If waiting attempts go up but recent comments stay empty, the webhook is not arriving and the Graph lookup is not finding the comment.</li>
-              <li>2. If recent comments appear but remain unmatched, compare the stored comment text against the expected comment text in recent attempts.</li>
+              <li>2. Use the live Graph comments section below to see the exact comments Meta currently returns for the post and whether each one matches a pending attempt.</li>
               <li>3. If the connected Page does not match the post ID prefix, the task is watching the wrong Page/post combination.</li>
             </ol>
+          </div>
+
+          <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-sm font-semibold text-slate-900">
+                Live Graph comments on this post
+              </p>
+              <StatusBadge
+                label={`${taskDebug.liveCommentCount} COMMENTS`}
+                tone="neutral"
+              />
+            </div>
+            {taskDebug.liveLookupError ? (
+              <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
+                {taskDebug.liveLookupError}
+              </p>
+            ) : null}
+            {taskDebug.liveComments.length > 0 ? (
+              <ul className="mt-3 space-y-3">
+                {taskDebug.liveComments.map((comment) => (
+                  <li
+                    key={comment.commentId}
+                    className="rounded-xl bg-white px-4 py-3 text-sm leading-6 text-slate-700"
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <StatusBadge
+                        label={
+                          comment.matchingAttemptIds.length > 0
+                            ? "MATCHES ATTEMPT"
+                            : "NO MATCH"
+                        }
+                        tone={
+                          comment.matchingAttemptIds.length > 0
+                            ? "verified"
+                            : "warning"
+                        }
+                      />
+                      <span className="font-mono text-xs text-slate-500">
+                        {comment.commentId}
+                      </span>
+                    </div>
+                    <p className="mt-2">
+                      Comment text: <code>{comment.message ?? "missing message"}</code>
+                    </p>
+                    <p>
+                      Normalized text:{" "}
+                      <code>{comment.normalizedMessage ?? "not available"}</code>
+                    </p>
+                    {comment.createdAt ? (
+                      <p>
+                        Created:{" "}
+                        {new Intl.DateTimeFormat("en", {
+                          dateStyle: "medium",
+                          timeStyle: "short",
+                        }).format(new Date(comment.createdAt))}
+                      </p>
+                    ) : null}
+                    {comment.matchingVerificationCodes.length > 0 ? (
+                      <p>
+                        Matching verification codes:{" "}
+                        <code>{comment.matchingVerificationCodes.join(", ")}</code>
+                      </p>
+                    ) : null}
+                    {comment.matchingExpectedCommentTexts.length > 0 ? (
+                      <p>
+                        Matching expected comments:{" "}
+                        <code>{comment.matchingExpectedCommentTexts.join(" | ")}</code>
+                      </p>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-3 text-sm leading-6 text-slate-700">
+                No comments were returned from the Graph API for this post.
+              </p>
+            )}
           </div>
 
           <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-4">
@@ -1793,6 +1934,7 @@ export default function AdminEventTasks({
           <h2 className="font-display text-xl font-semibold">Create task</h2>
           <div className="mt-4">
             <TaskForm
+              actionData={actionData}
               buttonLabel="Create task"
               facebookPostOptions={facebookPostOptions}
               intent="create"
@@ -1833,6 +1975,7 @@ export default function AdminEventTasks({
                 </div>
               </div>
               <TaskForm
+                actionData={actionData}
                 buttonLabel="Save task"
                 facebookPostOptions={facebookPostOptions}
                 intent="update"

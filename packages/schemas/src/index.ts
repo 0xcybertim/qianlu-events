@@ -455,6 +455,8 @@ export const adminFacebookCommentTaskDebugSchema = z.object({
   pendingAttemptCount: z.number().int().nonnegative(),
   verifiedAttemptCount: z.number().int().nonnegative(),
   unmatchedCommentCount: z.number().int().nonnegative(),
+  liveCommentCount: z.number().int().nonnegative(),
+  liveLookupError: z.string().nullable(),
   recentAttempts: z.array(
     z.object({
       awaitingAutoVerificationAt: z.string().nullable(),
@@ -483,6 +485,18 @@ export const adminFacebookCommentTaskDebugSchema = z.object({
       participantVerificationCode: z.string().nullable(),
       processedAt: z.string().nullable(),
       taskAttemptId: z.string().nullable(),
+    }),
+  ),
+  liveComments: z.array(
+    z.object({
+      commentId: z.string(),
+      createdAt: z.string().nullable(),
+      matchingAttemptIds: z.array(z.string()),
+      matchingExpectedCommentTexts: z.array(z.string()),
+      matchingVerificationCodes: z.array(z.string()),
+      message: z.string().nullable(),
+      normalizedMessage: z.string().nullable(),
+      parentId: z.string().nullable(),
     }),
   ),
 });

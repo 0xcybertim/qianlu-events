@@ -3,7 +3,11 @@ import { createHash, randomBytes } from "node:crypto";
 import { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { Prisma, type AdminRole } from "@prisma/client";
 import { ADMIN_SESSION_COOKIE_NAME } from "@qianlu-events/config";
-import { getFacebookCommentTaskConfig } from "@qianlu-events/domain";
+import {
+  getFacebookCommentTaskConfig,
+  matchesFacebookCommentText,
+  normalizeCommentText,
+} from "@qianlu-events/domain";
 import {
   adminAuthLoginBodySchema,
   adminFacebookConnectionSelectBodySchema,
@@ -27,6 +31,7 @@ import {
 import {
   buildFacebookOAuthUrl,
   exchangeFacebookCodeForUserAccessToken,
+  fetchFacebookPostComments,
   fetchFacebookPagePosts,
   fetchFacebookGrantedPermissions,
   fetchFacebookManagedPages,
@@ -256,6 +261,42 @@ function getProofString(proofJson: unknown, key: string) {
   return typeof value === "string" ? value : null;
 }
 
+function normalizeTaskComparisonValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeTaskComparisonValue(item));
+  }
+
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([, entry]) => entry !== undefined)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, entry]) => [key, normalizeTaskComparisonValue(entry)]),
+    );
+  }
+
+  if (typeof value === "string") {
+    return value.trim();
+  }
+
+  return value ?? null;
+}
+
+type ComparableTaskDefinition = {
+  configJson: unknown;
+  description: string;
+  platform: string;
+  points: number;
+  requiresVerification: boolean;
+  title: string;
+  type: string;
+  verificationType: string;
+};
+
+function serializeComparableTaskDefinition(task: ComparableTaskDefinition) {
+  return JSON.stringify(normalizeTaskComparisonValue(task));
+}
+
 function toStatusCounts(
   attempts: {
     status: TaskAttemptStatus;
@@ -397,6 +438,26 @@ function toTaskCreateData(
   } satisfies Prisma.TaskUncheckedCreateInput;
 }
 
+function toComparableTaskDefinitionForCreate(
+  body: z.infer<typeof adminTaskCreateBodyWithFacebookSourceSchema>,
+): ComparableTaskDefinition {
+  const facebookCommentConfig =
+    body.type === "SOCIAL_COMMENT" && body.platform === "FACEBOOK"
+      ? facebookCommentTaskConfigSchema.parse(body.configJson ?? null)
+      : null;
+
+  return {
+    configJson: (facebookCommentConfig ?? body.configJson) ?? null,
+    description: body.description.trim(),
+    platform: body.platform,
+    points: body.points,
+    requiresVerification: facebookCommentConfig ? true : body.requiresVerification,
+    title: body.title.trim(),
+    type: body.type,
+    verificationType: facebookCommentConfig ? "AUTOMATIC" : body.verificationType,
+  };
+}
+
 function toTaskUpdateData(args: {
   body: z.infer<typeof adminTaskUpdateBodySchema>;
   currentTask: {
@@ -440,6 +501,110 @@ function toTaskUpdateData(args: {
   if (facebookCommentConfig) data.verificationType = "AUTOMATIC";
 
   return data;
+}
+
+function toComparableTaskDefinitionForUpdate(args: {
+  body: z.infer<typeof adminTaskUpdateBodySchema>;
+  currentTask: {
+    configJson: Prisma.JsonValue | null;
+    description: string;
+    platform: string;
+    points: number;
+    requiresVerification: boolean;
+    title: string;
+    type: string;
+    verificationType: string;
+  };
+}) {
+  const { body, currentTask } = args;
+  const merged = {
+    configJson: body.configJson ?? currentTask.configJson,
+    description: body.description ?? currentTask.description,
+    platform: body.platform ?? currentTask.platform,
+    points: body.points ?? currentTask.points,
+    requiresVerification:
+      body.requiresVerification ?? currentTask.requiresVerification,
+    title: body.title ?? currentTask.title,
+    type: body.type ?? currentTask.type,
+    verificationType: body.verificationType ?? currentTask.verificationType,
+  };
+  const facebookCommentConfig =
+    merged.type === "SOCIAL_COMMENT" && merged.platform === "FACEBOOK"
+      ? facebookCommentTaskConfigSchema.parse(merged.configJson ?? null)
+      : null;
+
+  return {
+    configJson: (facebookCommentConfig ?? merged.configJson) ?? null,
+    description: merged.description.trim(),
+    platform: merged.platform,
+    points: merged.points,
+    requiresVerification: facebookCommentConfig ? true : merged.requiresVerification,
+    title: merged.title.trim(),
+    type: merged.type,
+    verificationType: facebookCommentConfig ? "AUTOMATIC" : merged.verificationType,
+  } satisfies ComparableTaskDefinition;
+}
+
+function toComparableTaskDefinitionFromExisting(task: {
+  configJson: Prisma.JsonValue | null;
+  description: string;
+  platform: string;
+  points: number;
+  requiresVerification: boolean;
+  title: string;
+  type: string;
+  verificationType: string;
+}) {
+  return {
+    configJson: task.configJson,
+    description: task.description.trim(),
+    platform: task.platform,
+    points: task.points,
+    requiresVerification: task.requiresVerification,
+    title: task.title.trim(),
+    type: task.type,
+    verificationType: task.verificationType,
+  } satisfies ComparableTaskDefinition;
+}
+
+async function findDuplicateTaskForEvent(args: {
+  eventId: string;
+  excludeTaskId?: string;
+  candidate: ComparableTaskDefinition;
+}) {
+  const signature = serializeComparableTaskDefinition(args.candidate);
+  const tasks = await prisma.task.findMany({
+    where: {
+      eventId: args.eventId,
+      ...(args.excludeTaskId
+        ? {
+            id: {
+              not: args.excludeTaskId,
+            },
+          }
+        : {}),
+    },
+    select: {
+      configJson: true,
+      description: true,
+      id: true,
+      platform: true,
+      points: true,
+      requiresVerification: true,
+      title: true,
+      type: true,
+      verificationType: true,
+    },
+  });
+
+  return (
+    tasks.find(
+      (task) =>
+        serializeComparableTaskDefinition(
+          toComparableTaskDefinitionFromExisting(task),
+        ) === signature,
+    ) ?? null
+  );
 }
 
 async function countLeads(eventId: string) {
@@ -1344,6 +1509,24 @@ export function registerAdminRoutes(app: FastifyInstance) {
               take: 10,
             }),
           ]);
+        let liveComments: Awaited<ReturnType<typeof fetchFacebookPostComments>> = [];
+        let liveLookupError: string | null = null;
+
+        if (access.event.facebookConnection?.pageAccessToken) {
+          try {
+            liveComments = await fetchFacebookPostComments(
+              config.facebookPostId,
+              access.event.facebookConnection.pageAccessToken,
+            );
+          } catch (error) {
+            liveLookupError =
+              error instanceof Error
+                ? error.message
+                : "Could not fetch Facebook comments for this post.";
+          }
+        } else {
+          liveLookupError = "No connected Page access token is available for this event.";
+        }
 
         const postIdPrefix = config.facebookPostId.includes("_")
           ? config.facebookPostId.split("_")[0]
@@ -1358,6 +1541,45 @@ export function registerAdminRoutes(app: FastifyInstance) {
               : null,
           connectedPageName: access.event.facebookConnection?.pageName ?? null,
           facebookPostId: config.facebookPostId,
+          liveCommentCount: liveComments.length,
+          liveComments: liveComments.map((comment) => {
+            const matchingAttempts = recentAttempts.filter((attempt) => {
+              const expectedCommentText = getProofString(
+                attempt.proofJson,
+                "expectedCommentText",
+              );
+
+              return Boolean(
+                comment.message &&
+                  expectedCommentText &&
+                  matchesFacebookCommentText({
+                    actualCommentText: comment.message,
+                    expectedCommentText,
+                  }),
+              );
+            });
+
+            return {
+              commentId: comment.id,
+              createdAt: comment.created_time ?? null,
+              matchingAttemptIds: matchingAttempts.map((attempt) => attempt.id),
+              matchingExpectedCommentTexts: matchingAttempts
+                .map((attempt) =>
+                  getProofString(attempt.proofJson, "expectedCommentText"),
+                )
+                .filter((value): value is string => Boolean(value)),
+              matchingVerificationCodes: matchingAttempts.map(
+                (attempt) => attempt.participantSession.verificationCode,
+              ),
+              message: comment.message ?? null,
+              normalizedMessage:
+                typeof comment.message === "string"
+                  ? normalizeCommentText(comment.message)
+                  : null,
+              parentId: comment.parent?.id ?? null,
+            };
+          }),
+          liveLookupError,
           pendingAttemptCount,
           primaryUrl: config.primaryUrl ?? null,
           recentAttempts: recentAttempts.map((attempt) => ({
@@ -1899,6 +2121,19 @@ export function registerAdminRoutes(app: FastifyInstance) {
         });
       }
 
+      const duplicateTask = await findDuplicateTaskForEvent({
+        candidate: toComparableTaskDefinitionForCreate(body),
+        eventId: access.event.id,
+      });
+
+      if (duplicateTask) {
+        reply.code(409);
+
+        return {
+          message: `An identical task already exists for this event: ${duplicateTask.title}.`,
+        };
+      }
+
       const task = await prisma.task.create({
         data: toTaskCreateData(access.event.id, body),
       });
@@ -1950,6 +2185,23 @@ export function registerAdminRoutes(app: FastifyInstance) {
           eventId: access.event.id,
           pageId: body.facebookSourcePageId ?? null,
         });
+      }
+
+      const duplicateTask = await findDuplicateTaskForEvent({
+        candidate: toComparableTaskDefinitionForUpdate({
+          body,
+          currentTask: task,
+        }),
+        eventId: access.event.id,
+        excludeTaskId: task.id,
+      });
+
+      if (duplicateTask) {
+        reply.code(409);
+
+        return {
+          message: `Another identical task already exists for this event: ${duplicateTask.title}.`,
+        };
       }
 
       const updatedTask = await prisma.task.update({
