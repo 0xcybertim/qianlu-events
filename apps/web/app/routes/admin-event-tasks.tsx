@@ -731,7 +731,7 @@ function FacebookOnboardingCard({
             <p className="text-sm font-semibold text-slate-900">Step 1. Prepare Meta</p>
             <ol className="mt-3 space-y-3 text-sm leading-6 text-slate-700">
               <li>1. Add `Webhooks` and `Facebook Login for Business` to the Meta app.</li>
-              <li>2. Use a `User access token` configuration with `business_management`, `pages_show_list`, `pages_read_engagement`, and `pages_manage_metadata`.</li>
+              <li>2. Use a `User access token` configuration with `business_management`, `pages_show_list`, `pages_read_engagement`, `pages_read_user_content`, and `pages_manage_metadata`.</li>
               <li>3. If the Page is inside a business portfolio, the connecting person still needs Page-level tasks or role access.</li>
               <li>4. Subscribe the app to the `Page` object and the `feed` webhook field.</li>
             </ol>

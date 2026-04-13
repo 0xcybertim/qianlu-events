@@ -79,6 +79,7 @@ event. Task-level Facebook post settings still live in the task config itself.
    - `business_management`
    - `pages_show_list`
    - `pages_read_engagement`
+   - `pages_read_user_content`
    - `pages_manage_metadata`
 8. If the target Page is business-managed, make sure the connecting person has
    actual Page tasks / role access. Business visibility by itself is not enough
