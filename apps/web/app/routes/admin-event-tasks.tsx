@@ -9,6 +9,7 @@ import {
   fetchAdminEvent,
   fetchAdminFacebookCommentDebug,
   fetchAdminFacebookConnectionDebug,
+  fetchAdminFacebookPostOptions,
   fetchAdminFacebookPendingConnection,
   selectAdminFacebookConnection,
   updateAdminTask,
@@ -821,12 +822,14 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     const [
       event,
       facebookCommentDebug,
+      facebookPostOptions,
       latestFacebookDebug,
       pendingFacebookConnection,
     ] =
       await Promise.all([
         fetchAdminEvent(params.eventSlug, request),
         fetchAdminFacebookCommentDebug(params.eventSlug, request),
+        fetchAdminFacebookPostOptions(params.eventSlug, request),
         fetchAdminFacebookConnectionDebug(params.eventSlug, request),
         fetchAdminFacebookPendingConnection(params.eventSlug, request),
       ]);
@@ -836,6 +839,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
       connectStatus: url.searchParams.get("facebookConnect"),
       event,
       facebookCommentDebug,
+      facebookPostOptions,
       latestFacebookDebug,
       pendingFacebookConnection,
     };
@@ -905,10 +909,22 @@ export async function action({ params, request }: Route.ActionArgs) {
 
 function TaskForm({
   buttonLabel,
+  facebookPostOptions,
   intent,
   task,
 }: {
   buttonLabel: string;
+  facebookPostOptions: {
+    connectedPageId: string | null;
+    connectedPageName: string | null;
+    error: string | null;
+    posts: {
+      createdAt: string | null;
+      messagePreview: string;
+      permalinkUrl: string | null;
+      postId: string;
+    }[];
+  };
   intent: "create" | "update";
   task?: {
     id: string;
@@ -957,6 +973,27 @@ function TaskForm({
     : currentGuide.allowedVerificationTypes;
   const isFacebookCommentPreset =
     selectedType === "SOCIAL_COMMENT" && selectedPlatform === "FACEBOOK";
+  const initialSavedPostId = task?.configJson?.facebookPostId ?? "";
+  const matchingSavedPost =
+    facebookPostOptions.posts.find((post) => post.postId === initialSavedPostId) ??
+    null;
+  const [manualFacebookPostEntry, setManualFacebookPostEntry] = useState(
+    initialSavedPostId.length > 0 && !matchingSavedPost,
+  );
+  const [selectedFacebookPostId, setSelectedFacebookPostId] = useState(
+    matchingSavedPost?.postId ?? "",
+  );
+  const [facebookPostIdValue, setFacebookPostIdValue] = useState(
+    matchingSavedPost?.postId ?? initialSavedPostId,
+  );
+  const [facebookPrimaryUrlValue, setFacebookPrimaryUrlValue] = useState(
+    matchingSavedPost?.permalinkUrl ?? task?.configJson?.primaryUrl ?? "",
+  );
+  const selectedFacebookPost =
+    selectedFacebookPostId.length > 0
+      ? facebookPostOptions.posts.find((post) => post.postId === selectedFacebookPostId) ??
+        null
+      : null;
 
   function handleTypeChange(nextType: string) {
     const nextGuide = getTaskTypeGuide(nextType);
@@ -965,6 +1002,17 @@ function TaskForm({
     setSelectedPlatform(nextGuide.defaultPlatform);
     setSelectedVerificationType(nextGuide.defaultVerificationType);
     setRequiresVerification(nextGuide.defaultRequiresVerification);
+  }
+
+  function handleFacebookPostSelect(nextPostId: string) {
+    setSelectedFacebookPostId(nextPostId);
+
+    const selectedPost =
+      facebookPostOptions.posts.find((post) => post.postId === nextPostId) ??
+      null;
+
+    setFacebookPostIdValue(selectedPost?.postId ?? "");
+    setFacebookPrimaryUrlValue(selectedPost?.permalinkUrl ?? "");
   }
 
   return (
@@ -1148,15 +1196,16 @@ function TaskForm({
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2">
-        <AdminField label="Primary URL">
-          <input
-            className={adminInputClass}
-            defaultValue={task?.configJson?.primaryUrl ?? ""}
-            name="primaryUrl"
-            type="url"
-            {...(isFacebookCommentPreset ? { required: true } : {})}
-          />
-        </AdminField>
+        {!currentGuide.showFacebookCommentFields ? (
+          <AdminField label="Primary URL">
+            <input
+              className={adminInputClass}
+              defaultValue={task?.configJson?.primaryUrl ?? ""}
+              name="primaryUrl"
+              type="url"
+            />
+          </AdminField>
+        ) : null}
         <AdminField label="Primary label">
           <input
             className={adminInputClass}
@@ -1205,6 +1254,96 @@ function TaskForm({
               participant code.
             </p>
           </div>
+          <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-4">
+            <p className="text-sm font-semibold text-slate-900">
+              Source Page and post
+            </p>
+            <p className="mt-2 text-sm leading-6 text-slate-700">
+              The task reads posts from the event&apos;s connected Facebook
+              Page.
+              {facebookPostOptions.connectedPageName
+                ? ` Current source: ${facebookPostOptions.connectedPageName}${facebookPostOptions.connectedPageId ? ` (${facebookPostOptions.connectedPageId})` : ""}.`
+                : " No connected Page is available yet."}
+            </p>
+            {facebookPostOptions.error ? (
+              <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
+                {facebookPostOptions.error}
+              </p>
+            ) : null}
+            {!manualFacebookPostEntry && facebookPostOptions.posts.length > 0 ? (
+              <div className="mt-4 space-y-3">
+                <AdminField label="Choose recent post from connected Page">
+                  <select
+                    className={adminInputClass}
+                    onChange={(event) => handleFacebookPostSelect(event.target.value)}
+                    required
+                    value={selectedFacebookPostId}
+                  >
+                    <option value="">Select a Facebook post</option>
+                    {facebookPostOptions.posts.map((post) => (
+                      <option key={post.postId} value={post.postId}>
+                        {post.createdAt
+                          ? `${new Intl.DateTimeFormat("en", {
+                              dateStyle: "medium",
+                            }).format(new Date(post.createdAt))} - `
+                          : ""}
+                        {post.messagePreview}
+                      </option>
+                    ))}
+                  </select>
+                </AdminField>
+                {selectedFacebookPost ? (
+                  <div className="rounded-xl bg-white px-4 py-3 text-sm leading-6 text-slate-700">
+                    <p>
+                      Graph post ID: <code>{selectedFacebookPost.postId}</code>
+                    </p>
+                    {selectedFacebookPost.permalinkUrl ? (
+                      <p>
+                        Permalink:{" "}
+                        <a
+                          className="underline"
+                          href={selectedFacebookPost.permalinkUrl}
+                          rel="noreferrer"
+                          target="_blank"
+                        >
+                          {selectedFacebookPost.permalinkUrl}
+                        </a>
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
+                <button
+                  className="text-sm font-semibold text-slate-900 underline"
+                  onClick={() => setManualFacebookPostEntry(true)}
+                  type="button"
+                >
+                  Enter post details manually instead
+                </button>
+              </div>
+            ) : (
+              <div className="mt-4 space-y-3">
+                <p className="text-sm leading-6 text-slate-700">
+                  Manual entry is a fallback. The post picker is safer because
+                  it stores the real Graph post ID from the connected Page.
+                </p>
+                {facebookPostOptions.posts.length > 0 ? (
+                  <button
+                    className="text-sm font-semibold text-slate-900 underline"
+                    onClick={() => {
+                      setManualFacebookPostEntry(false);
+
+                      if (!selectedFacebookPostId && facebookPostOptions.posts[0]) {
+                        handleFacebookPostSelect(facebookPostOptions.posts[0].postId);
+                      }
+                    }}
+                    type="button"
+                  >
+                    Choose from recent connected Page posts instead
+                  </button>
+                ) : null}
+              </div>
+            )}
+          </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <AdminField label="Required prefix">
               <input
@@ -1218,13 +1357,26 @@ function TaskForm({
             <AdminField label="Facebook post ID">
               <input
                 className={adminInputClass}
-                defaultValue={task?.configJson?.facebookPostId ?? ""}
                 name="facebookPostId"
+                onChange={(event) => setFacebookPostIdValue(event.target.value)}
                 placeholder="pageid_postid"
+                readOnly={!manualFacebookPostEntry}
                 required
+                value={facebookPostIdValue}
               />
             </AdminField>
           </div>
+          <AdminField label="Facebook post URL">
+            <input
+              className={adminInputClass}
+              name="primaryUrl"
+              onChange={(event) => setFacebookPrimaryUrlValue(event.target.value)}
+              readOnly={!manualFacebookPostEntry}
+              required
+              type="url"
+              value={facebookPrimaryUrlValue}
+            />
+          </AdminField>
           <AdminField label="Comment instructions">
             <textarea
               className={adminInputClass}
@@ -1546,6 +1698,7 @@ export default function AdminEventTasks({
     connectStatus,
     event,
     facebookCommentDebug,
+    facebookPostOptions,
     latestFacebookDebug,
     pendingFacebookConnection,
   } =
@@ -1580,7 +1733,11 @@ export default function AdminEventTasks({
         <AdminCard>
           <h2 className="font-display text-xl font-semibold">Create task</h2>
           <div className="mt-4">
-            <TaskForm buttonLabel="Create task" intent="create" />
+            <TaskForm
+              buttonLabel="Create task"
+              facebookPostOptions={facebookPostOptions}
+              intent="create"
+            />
           </div>
         </AdminCard>
 
@@ -1616,7 +1773,12 @@ export default function AdminEventTasks({
                   ) : null}
                 </div>
               </div>
-              <TaskForm buttonLabel="Save task" intent="update" task={task} />
+              <TaskForm
+                buttonLabel="Save task"
+                facebookPostOptions={facebookPostOptions}
+                intent="update"
+                task={task}
+              />
               {task.type === "SOCIAL_COMMENT" &&
               task.platform === "FACEBOOK" &&
               task.configJson?.autoVerify ? (

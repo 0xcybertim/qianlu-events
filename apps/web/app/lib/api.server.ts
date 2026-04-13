@@ -4,6 +4,7 @@ import {
   adminEventDetailSchema,
   adminFacebookCommentDebugResponseSchema,
   adminFacebookConnectionDebugSchema,
+  adminFacebookPostOptionsResponseSchema,
   adminEventsResponseSchema,
   adminFacebookPendingConnectionSchema,
   adminLeadsResponseSchema,
@@ -289,6 +290,18 @@ export async function fetchAdminFacebookCommentDebug(
   });
 
   return adminFacebookCommentDebugResponseSchema.parse(await response.json());
+}
+
+export async function fetchAdminFacebookPostOptions(
+  eventSlug: string,
+  request?: Request,
+) {
+  const response = await apiRequest({
+    path: `/admin/events/${encodeURIComponent(eventSlug)}/facebook-post-options`,
+    request,
+  });
+
+  return adminFacebookPostOptionsResponseSchema.parse(await response.json());
 }
 
 export async function selectAdminFacebookConnection(

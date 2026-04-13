@@ -27,6 +27,7 @@ import {
 import {
   buildFacebookOAuthUrl,
   exchangeFacebookCodeForUserAccessToken,
+  fetchFacebookPagePosts,
   fetchFacebookGrantedPermissions,
   fetchFacebookManagedPages,
 } from "../lib/facebook.js";
@@ -1375,6 +1376,72 @@ export function registerAdminRoutes(app: FastifyInstance) {
     return {
       tasks,
     };
+  });
+
+  app.get<{
+    Params: { eventSlug: string };
+  }>("/admin/events/:eventSlug/facebook-post-options", async (request, reply) => {
+    const access = await requireEventAccess({
+      eventSlug: request.params.eventSlug,
+      minRole: "VIEWER",
+      reply,
+      request,
+    });
+
+    if (!access || "message" in access) {
+      return access ?? { connectedPageId: null, connectedPageName: null, error: null, posts: [] };
+    }
+
+    const connection = access.event.facebookConnection;
+
+    if (!connection?.pageId || !connection.pageAccessToken) {
+      return {
+        connectedPageId: connection?.pageId ?? null,
+        connectedPageName: connection?.pageName ?? null,
+        error: "Connect a Facebook Page for this event before selecting a post.",
+        posts: [],
+      };
+    }
+
+    try {
+      const posts = await fetchFacebookPagePosts(
+        connection.pageId,
+        connection.pageAccessToken,
+      );
+
+      return {
+        connectedPageId: connection.pageId,
+        connectedPageName: connection.pageName ?? null,
+        error: null,
+        posts: posts.map((post) => ({
+          createdAt: post.created_time ?? null,
+          messagePreview:
+            (post.message ?? post.story ?? "").trim().slice(0, 140) ||
+            `Facebook post ${post.id}`,
+          permalinkUrl: post.permalink_url ?? null,
+          postId: post.id,
+        })),
+      };
+    } catch (error) {
+      request.log.warn(
+        {
+          error,
+          eventId: access.event.id,
+          pageId: connection.pageId,
+        },
+        "Could not load Facebook post options for admin task form.",
+      );
+
+      return {
+        connectedPageId: connection.pageId,
+        connectedPageName: connection.pageName ?? null,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Could not load recent Facebook posts for the connected Page.",
+        posts: [],
+      };
+    }
   });
 
   app.post<{ Params: { eventSlug: string } }>(

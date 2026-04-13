@@ -339,6 +339,20 @@ export const adminFacebookPendingConnectionSchema = z.object({
   expiresAt: z.string(),
 });
 
+export const adminFacebookPostOptionSchema = z.object({
+  createdAt: z.string().nullable(),
+  messagePreview: z.string(),
+  permalinkUrl: z.string().url().nullable(),
+  postId: z.string(),
+});
+
+export const adminFacebookPostOptionsResponseSchema = z.object({
+  connectedPageId: z.string().nullable(),
+  connectedPageName: z.string().nullable(),
+  error: z.string().nullable(),
+  posts: z.array(adminFacebookPostOptionSchema),
+});
+
 export const adminFacebookConnectionSelectBodySchema = z.object({
   pageId: z.string().trim().min(1),
 });
@@ -600,6 +614,9 @@ export type AdminEventDetail = z.infer<typeof adminEventDetailSchema>;
 export type AdminTask = z.infer<typeof adminTaskSchema>;
 export type AdminFacebookConnection = z.infer<
   typeof adminFacebookConnectionSchema
+>;
+export type AdminFacebookPostOptionsResponse = z.infer<
+  typeof adminFacebookPostOptionsResponseSchema
 >;
 export type AdminFacebookCommentDebugResponse = z.infer<
   typeof adminFacebookCommentDebugResponseSchema

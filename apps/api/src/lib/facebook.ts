@@ -30,6 +30,14 @@ type FacebookGraphComment = {
   };
 };
 
+type FacebookGraphPost = {
+  created_time?: string;
+  id: string;
+  message?: string;
+  permalink_url?: string;
+  story?: string;
+};
+
 type FacebookOAuthTokenResponse = {
   access_token?: string;
 };
@@ -847,6 +855,24 @@ export async function fetchFacebookPostComments(
     fields: "id,message,created_time,parent{id}",
     filter: "stream",
     limit: "100",
+    },
+  );
+
+  return response?.data ?? [];
+}
+
+export async function fetchFacebookPagePosts(
+  pageId: string,
+  accessToken?: string | null,
+) {
+  const response = await facebookGraphRequest<{
+    data?: FacebookGraphPost[];
+  }>(
+    `/${encodeURIComponent(pageId)}/posts`,
+    accessToken,
+    {
+      fields: "id,message,story,created_time,permalink_url",
+      limit: "25",
     },
   );
 
