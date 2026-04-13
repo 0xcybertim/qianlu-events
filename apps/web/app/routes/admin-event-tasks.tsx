@@ -1,5 +1,6 @@
 import { Button, StatusBadge } from "@qianlu-events/ui";
 import { Form, redirect } from "react-router";
+import { useState } from "react";
 
 import type { Route } from "./+types/admin-event-tasks";
 import {
@@ -46,6 +47,232 @@ const verificationTypes = [
   "VISUAL_STAFF_CHECK",
   "STAFF_PIN_CONFIRM",
 ] as const;
+
+type TaskTypeValue = (typeof taskTypes)[number];
+type PlatformValue = (typeof platforms)[number];
+type VerificationTypeValue = (typeof verificationTypes)[number];
+
+type TaskTypeGuide = {
+  allowedPlatforms: PlatformValue[];
+  allowedVerificationTypes: VerificationTypeValue[];
+  defaultPlatform: PlatformValue;
+  defaultRequiresVerification: boolean;
+  defaultVerificationType: VerificationTypeValue;
+  detailHint: string;
+  lockPlatform?: boolean;
+  lockRequiresVerification?: boolean;
+  lockVerification?: boolean;
+  setupSteps: string[];
+  showCommentAutomationOptions?: boolean;
+  showFacebookCommentFields?: boolean;
+  showProofHint?: boolean;
+  showSecondaryLinkFields?: boolean;
+  summary: string;
+};
+
+const taskTypeGuides: Record<TaskTypeValue, TaskTypeGuide> = {
+  SOCIAL_FOLLOW: {
+    allowedPlatforms: ["INSTAGRAM", "FACEBOOK", "TIKTOK", "WHATSAPP"],
+    allowedVerificationTypes: ["VISUAL_STAFF_CHECK", "STAFF_PIN_CONFIRM", "NONE"],
+    defaultPlatform: "INSTAGRAM",
+    defaultRequiresVerification: true,
+    defaultVerificationType: "VISUAL_STAFF_CHECK",
+    detailHint: "Use this for manual follow tasks on social platforms.",
+    setupSteps: [
+      "Choose the social platform participants should follow.",
+      "Add the profile URL and a clear button label.",
+      "Tell staff what proof to expect if manual verification is needed.",
+    ],
+    showProofHint: true,
+    showSecondaryLinkFields: false,
+    summary: "Participants open a profile, follow it, and return for manual or staff-assisted verification.",
+  },
+  SOCIAL_LIKE: {
+    allowedPlatforms: ["INSTAGRAM", "FACEBOOK", "TIKTOK"],
+    allowedVerificationTypes: ["VISUAL_STAFF_CHECK", "STAFF_PIN_CONFIRM", "NONE"],
+    defaultPlatform: "FACEBOOK",
+    defaultRequiresVerification: true,
+    defaultVerificationType: "VISUAL_STAFF_CHECK",
+    detailHint: "Use this for post-like tasks that are checked manually.",
+    setupSteps: [
+      "Choose the platform that contains the post.",
+      "Paste the public post URL participants should open.",
+      "Describe what proof staff should look for if verification stays manual.",
+    ],
+    showProofHint: true,
+    showSecondaryLinkFields: false,
+    summary: "Participants open a social post and like it. Manual verification is recommended.",
+  },
+  SOCIAL_SHARE: {
+    allowedPlatforms: ["FACEBOOK", "INSTAGRAM", "TIKTOK", "WHATSAPP"],
+    allowedVerificationTypes: ["VISUAL_STAFF_CHECK", "STAFF_PIN_CONFIRM", "NONE"],
+    defaultPlatform: "FACEBOOK",
+    defaultRequiresVerification: true,
+    defaultVerificationType: "VISUAL_STAFF_CHECK",
+    detailHint: "Use this when participants need to share or repost something manually.",
+    setupSteps: [
+      "Choose the platform participants should share from.",
+      "Paste the source URL or post they should share.",
+      "Explain how staff can verify the share if needed.",
+    ],
+    showProofHint: true,
+    showSecondaryLinkFields: true,
+    summary: "Participants share a social post or link. Manual verification is recommended.",
+  },
+  SOCIAL_COMMENT: {
+    allowedPlatforms: ["FACEBOOK"],
+    allowedVerificationTypes: ["AUTOMATIC"],
+    defaultPlatform: "FACEBOOK",
+    defaultRequiresVerification: true,
+    defaultVerificationType: "AUTOMATIC",
+    detailHint: "This preset is locked to Facebook because the current automatic verification flow only supports Facebook Page comments.",
+    lockPlatform: true,
+    lockRequiresVerification: true,
+    lockVerification: true,
+    setupSteps: [
+      "Connect the Facebook Page that owns the target post.",
+      "Paste the public Facebook post URL and the Graph API post ID.",
+      "Choose the required prefix participants must comment, for example `QIANLU`.",
+      "Keep participant verification code and auto verify turned on.",
+    ],
+    showCommentAutomationOptions: true,
+    showFacebookCommentFields: true,
+    showProofHint: false,
+    showSecondaryLinkFields: false,
+    summary: "Participants comment a generated code on a Facebook post and the system verifies it automatically through the webhook/API flow.",
+  },
+  LEAD_FORM: {
+    allowedPlatforms: ["EMAIL"],
+    allowedVerificationTypes: ["NONE"],
+    defaultPlatform: "EMAIL",
+    defaultRequiresVerification: false,
+    defaultVerificationType: "NONE",
+    detailHint: "This is an internal form task, so no external verification step is needed.",
+    lockPlatform: true,
+    lockRequiresVerification: true,
+    lockVerification: true,
+    setupSteps: [
+      "Write a clear title and explain what information the participant should submit.",
+      "Keep verification turned off because the form itself completes the task.",
+    ],
+    showProofHint: false,
+    showSecondaryLinkFields: false,
+    summary: "Participants submit details directly in the app. The task completes without manual review.",
+  },
+  QUIZ: {
+    allowedPlatforms: ["NONE"],
+    allowedVerificationTypes: ["NONE"],
+    defaultPlatform: "NONE",
+    defaultRequiresVerification: false,
+    defaultVerificationType: "NONE",
+    detailHint: "Quiz tasks complete inside the app and do not need a platform or verification step.",
+    lockPlatform: true,
+    lockRequiresVerification: true,
+    lockVerification: true,
+    setupSteps: [
+      "Write a title and description that tell participants what quiz they are taking.",
+      "Keep verification turned off because the quiz flow handles completion.",
+    ],
+    showProofHint: false,
+    showSecondaryLinkFields: false,
+    summary: "Participants answer questions inside the app. The task completes without manual review.",
+  },
+  NEWSLETTER_OPT_IN: {
+    allowedPlatforms: ["EMAIL"],
+    allowedVerificationTypes: ["NONE", "VISUAL_STAFF_CHECK"],
+    defaultPlatform: "EMAIL",
+    defaultRequiresVerification: false,
+    defaultVerificationType: "NONE",
+    detailHint: "Use this for email/newsletter sign-up flows.",
+    lockPlatform: true,
+    setupSteps: [
+      "Add the signup link participants should open.",
+      "Use verification only if your process needs a manual staff check.",
+    ],
+    showProofHint: true,
+    showSecondaryLinkFields: false,
+    summary: "Participants opt in to email updates. Usually no manual verification is needed.",
+  },
+  WHATSAPP_OPT_IN: {
+    allowedPlatforms: ["WHATSAPP"],
+    allowedVerificationTypes: ["VISUAL_STAFF_CHECK", "STAFF_PIN_CONFIRM", "NONE"],
+    defaultPlatform: "WHATSAPP",
+    defaultRequiresVerification: true,
+    defaultVerificationType: "VISUAL_STAFF_CHECK",
+    detailHint: "Use this for WhatsApp chats or group join actions.",
+    lockPlatform: true,
+    setupSteps: [
+      "Paste the WhatsApp deep link participants should open.",
+      "Explain what proof staff should look for after the join or message action.",
+    ],
+    showProofHint: true,
+    showSecondaryLinkFields: false,
+    summary: "Participants open a WhatsApp action and confirm it through manual verification.",
+  },
+  REFERRAL: {
+    allowedPlatforms: ["NONE", "EMAIL", "WHATSAPP"],
+    allowedVerificationTypes: ["NONE", "VISUAL_STAFF_CHECK", "STAFF_PIN_CONFIRM"],
+    defaultPlatform: "NONE",
+    defaultRequiresVerification: false,
+    defaultVerificationType: "NONE",
+    detailHint: "Use this for invite-a-friend or referral style mechanics.",
+    setupSteps: [
+      "Describe what counts as a valid referral.",
+      "Only turn verification on if staff need to review the referral manually.",
+    ],
+    showProofHint: true,
+    showSecondaryLinkFields: false,
+    summary: "Participants complete a referral action. Verification depends on your event process.",
+  },
+  PHOTO_PROOF: {
+    allowedPlatforms: ["IN_PERSON", "NONE"],
+    allowedVerificationTypes: ["VISUAL_STAFF_CHECK"],
+    defaultPlatform: "IN_PERSON",
+    defaultRequiresVerification: true,
+    defaultVerificationType: "VISUAL_STAFF_CHECK",
+    detailHint: "Use this when staff need to inspect a submitted photo.",
+    lockVerification: true,
+    setupSteps: [
+      "Describe exactly what the participant must photograph.",
+      "Tell staff what makes the photo acceptable in the proof hint.",
+    ],
+    showProofHint: true,
+    showSecondaryLinkFields: false,
+    summary: "Participants submit or show a photo, and staff verify it visually.",
+  },
+  STAMP_SCAN: {
+    allowedPlatforms: ["IN_PERSON"],
+    allowedVerificationTypes: ["NONE"],
+    defaultPlatform: "IN_PERSON",
+    defaultRequiresVerification: false,
+    defaultVerificationType: "NONE",
+    detailHint: "Stamp scans complete through the QR/stamp flow and should not require a second verification step.",
+    lockPlatform: true,
+    lockRequiresVerification: true,
+    lockVerification: true,
+    setupSteps: [
+      "Create the stamp task title and placement order.",
+      "Use the QR Codes tab to issue the actual scan code for this task.",
+    ],
+    showProofHint: false,
+    showSecondaryLinkFields: false,
+    summary: "Participants scan a QR/stamp code in person. The scan itself completes the task.",
+  },
+};
+
+function getTaskTypeGuide(type: string) {
+  return taskTypeGuides[(taskTypes.includes(type as TaskTypeValue)
+    ? type
+    : "SOCIAL_FOLLOW") as TaskTypeValue];
+}
+
+function formatEnumLabel(value: string) {
+  return value
+    .toLowerCase()
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
 
 function getApiBaseUrl() {
   return (
@@ -153,6 +380,7 @@ function FacebookOnboardingCard({
     }[];
   } | null;
 }) {
+  const [showDebugDetails, setShowDebugDetails] = useState(false);
   const apiBaseUrl = getApiBaseUrl();
   const callbackUrl = `${apiBaseUrl}/integrations/facebook/webhook`;
   const facebookOauthStartUrl = getFacebookOauthStartUrl(eventSlug);
@@ -306,16 +534,25 @@ function FacebookOnboardingCard({
               Inspect the latest Meta OAuth result stored for this event.
             </p>
           </div>
-          {latestFacebookDebug ? (
-            <StatusBadge
-              label={latestFacebookDebug.consumedAt ? "CONSUMED" : "PENDING"}
-              tone={latestFacebookDebug.consumedAt ? "neutral" : "warning"}
-            />
-          ) : (
-            <StatusBadge label="NO DEBUG DATA" tone="neutral" />
-          )}
+          <div className="flex flex-wrap items-center gap-3">
+            {latestFacebookDebug ? (
+              <StatusBadge
+                label={latestFacebookDebug.consumedAt ? "CONSUMED" : "PENDING"}
+                tone={latestFacebookDebug.consumedAt ? "neutral" : "warning"}
+              />
+            ) : (
+              <StatusBadge label="NO DEBUG DATA" tone="neutral" />
+            )}
+            <button
+              className="inline-flex min-h-11 items-center justify-center rounded-full border border-[var(--color-border)] bg-white px-4 py-2 text-sm font-semibold text-slate-900 transition-colors hover:bg-slate-50"
+              onClick={() => setShowDebugDetails((value) => !value)}
+              type="button"
+            >
+              {showDebugDetails ? "Hide technical debug" : "Show technical debug"}
+            </button>
+          </div>
         </div>
-        {latestFacebookDebug ? (
+        {latestFacebookDebug && showDebugDetails ? (
           <div className="mt-4 space-y-3 text-sm leading-6 text-slate-700">
             <p>
               Last OAuth attempt{" "}
@@ -471,6 +708,10 @@ function FacebookOnboardingCard({
               </div>
             ) : null}
           </div>
+        ) : latestFacebookDebug ? (
+          <div className="mt-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] px-4 py-3 text-sm leading-6 text-slate-700">
+            Technical OAuth details are hidden by default. Open them only when you need to troubleshoot Page discovery or Meta permissions.
+          </div>
         ) : (
           <p className="mt-4 text-sm leading-6 text-slate-700">
             No Facebook OAuth debug information has been recorded for this
@@ -481,47 +722,43 @@ function FacebookOnboardingCard({
 
       <div className="mt-4 rounded-2xl bg-white/70 p-4">
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-          3. Meta app checklist
+          3. Quick setup flow
         </p>
-        <ol className="mt-3 space-y-3 text-sm leading-6 text-slate-700">
-          <li>1. Open your Meta app in Meta for Developers and add the Webhooks product.</li>
-          <li>2. In `Facebook Login for Business`, use the `User access token` configuration with `business_management`, `pages_show_list`, `pages_read_engagement`, and `pages_manage_metadata`.</li>
-          <li>3. If the Page sits inside a Meta business portfolio, the connecting person must still have Page-level tasks or role access so Meta can return a Page access token.</li>
-          <li>4. Choose the `Page` object and subscribe your app to it.</li>
-          <li>5. Paste the callback URL shown above and verify it with the same verify token value.</li>
-          <li>6. Subscribe the Page webhook to the `feed` field so Page comment events reach this app.</li>
-          <li>7. Use the `Connect Facebook Page` button above and sign in with the organizer&apos;s Meta account.</li>
-          <li>8. Copy the target Facebook post URL and its Graph API post ID for the task below.</li>
-        </ol>
-      </div>
-
-      <div className="mt-4 grid gap-4 lg:grid-cols-2">
-        <div className="rounded-2xl bg-white/70 p-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-            4. Task values to fill in
-          </p>
-          <ol className="mt-3 space-y-3 text-sm leading-6 text-slate-700">
-            <li>1. Type: `SOCIAL_COMMENT`</li>
-            <li>2. Platform: `FACEBOOK`</li>
-            <li>3. Verification type: `AUTOMATIC`</li>
-            <li>4. Primary URL: the public Facebook post URL</li>
-            <li>5. Required prefix: usually `QIANLU`</li>
-            <li>6. Facebook post ID: for example `123456789012345_987654321098765`</li>
-            <li>7. Leave `Include participant verification code` turned on</li>
-            <li>8. Leave `Auto verify via webhook/API` turned on</li>
-          </ol>
-        </div>
-
-        <div className="rounded-2xl bg-white/70 p-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-            5. What participants will do
-          </p>
-          <ol className="mt-3 space-y-3 text-sm leading-6 text-slate-700">
-            <li>1. Open the Facebook post from the task.</li>
-            <li>2. Comment the exact text shown in the task, for example `QIANLU AB12CD`.</li>
-            <li>3. Tap `I&apos;ve commented` in the participant flow.</li>
-            <li>4. The task moves to waiting for Facebook verification and then verifies automatically when the comment is matched.</li>
-          </ol>
+        <div className="mt-4 grid gap-4 lg:grid-cols-2">
+          <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-4">
+            <p className="text-sm font-semibold text-slate-900">Step 1. Prepare Meta</p>
+            <ol className="mt-3 space-y-3 text-sm leading-6 text-slate-700">
+              <li>1. Add `Webhooks` and `Facebook Login for Business` to the Meta app.</li>
+              <li>2. Use a `User access token` configuration with `business_management`, `pages_show_list`, `pages_read_engagement`, and `pages_manage_metadata`.</li>
+              <li>3. If the Page is inside a business portfolio, the connecting person still needs Page-level tasks or role access.</li>
+              <li>4. Subscribe the app to the `Page` object and the `feed` webhook field.</li>
+            </ol>
+          </div>
+          <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-4">
+            <p className="text-sm font-semibold text-slate-900">Step 2. Connect the Page</p>
+            <ol className="mt-3 space-y-3 text-sm leading-6 text-slate-700">
+              <li>1. Use `Connect Facebook Page` above.</li>
+              <li>2. Pick the exact Page that owns the post you want to verify.</li>
+              <li>3. Confirm the page shows as connected before creating the task.</li>
+            </ol>
+          </div>
+          <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-4">
+            <p className="text-sm font-semibold text-slate-900">Step 3. Create the task</p>
+            <ol className="mt-3 space-y-3 text-sm leading-6 text-slate-700">
+              <li>1. Choose `Social Comment` in the task form below.</li>
+              <li>2. The form will lock `Facebook` and `Automatic` for you.</li>
+              <li>3. Paste the public post URL and the Graph API post ID.</li>
+              <li>4. Set the required comment prefix, for example `QIANLU`.</li>
+            </ol>
+          </div>
+          <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-4">
+            <p className="text-sm font-semibold text-slate-900">Step 4. Participant flow</p>
+            <ol className="mt-3 space-y-3 text-sm leading-6 text-slate-700">
+              <li>1. Participants open the Facebook post from the task.</li>
+              <li>2. They comment the generated text, for example `QIANLU AB12CD`.</li>
+              <li>3. They tap `I&apos;ve commented` and the system verifies the comment automatically.</li>
+            </ol>
+          </div>
         </div>
       </div>
 
@@ -690,109 +927,218 @@ function TaskForm({
     } | null;
   };
 }) {
+  const initialType = task?.type ?? "SOCIAL_FOLLOW";
+  const initialGuide = getTaskTypeGuide(initialType);
+  const [selectedType, setSelectedType] = useState(initialType);
+  const currentGuide = getTaskTypeGuide(selectedType);
+  const [selectedPlatform, setSelectedPlatform] = useState(
+    task?.platform ?? initialGuide.defaultPlatform,
+  );
+  const [selectedVerificationType, setSelectedVerificationType] = useState(
+    task?.verificationType ?? initialGuide.defaultVerificationType,
+  );
+  const [requiresVerification, setRequiresVerification] = useState(
+    task?.requiresVerification ?? initialGuide.defaultRequiresVerification,
+  );
+
+  const availablePlatforms = currentGuide.lockPlatform
+    ? [currentGuide.defaultPlatform]
+    : currentGuide.allowedPlatforms;
+  const availableVerificationTypes = currentGuide.lockVerification
+    ? [currentGuide.defaultVerificationType]
+    : currentGuide.allowedVerificationTypes;
+  const isFacebookCommentPreset =
+    selectedType === "SOCIAL_COMMENT" && selectedPlatform === "FACEBOOK";
+
+  function handleTypeChange(nextType: string) {
+    const nextGuide = getTaskTypeGuide(nextType);
+
+    setSelectedType(nextType);
+    setSelectedPlatform(nextGuide.defaultPlatform);
+    setSelectedVerificationType(nextGuide.defaultVerificationType);
+    setRequiresVerification(nextGuide.defaultRequiresVerification);
+  }
+
   return (
     <Form className="space-y-4" method="post">
       <input name="intent" type="hidden" value={intent} />
       {task ? <input name="taskId" type="hidden" value={task.id} /> : null}
-      <div className="grid gap-3 sm:grid-cols-2">
-        <AdminField label="Title">
-          <input
-            className={adminInputClass}
-            defaultValue={task?.title ?? ""}
-            name="title"
-            required
-          />
-        </AdminField>
-        <AdminField label="Sort order">
-          <input
-            className={adminInputClass}
-            defaultValue={task?.sortOrder ?? 0}
-            name="sortOrder"
-            type="number"
-          />
-        </AdminField>
+      <div className="rounded-2xl bg-white/70 p-4">
+        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+          1. Choose task type
+        </p>
+        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+          <AdminField label="Task type">
+            <select
+              className={adminInputClass}
+              name="type"
+              onChange={(event) => handleTypeChange(event.target.value)}
+              value={selectedType}
+            >
+              {taskTypes.map((type) => (
+                <option key={type} value={type}>
+                  {formatEnumLabel(type)}
+                </option>
+              ))}
+            </select>
+          </AdminField>
+          <AdminField label="Platform">
+            {currentGuide.lockPlatform ? (
+              <>
+                <input name="platform" type="hidden" value={selectedPlatform} />
+                <input
+                  className={adminInputClass}
+                  disabled
+                  value={formatEnumLabel(selectedPlatform)}
+                />
+              </>
+            ) : (
+              <select
+                className={adminInputClass}
+                name="platform"
+                onChange={(event) => setSelectedPlatform(event.target.value)}
+                value={selectedPlatform}
+              >
+                {availablePlatforms.map((platform) => (
+                  <option key={platform} value={platform}>
+                    {formatEnumLabel(platform)}
+                  </option>
+                ))}
+              </select>
+            )}
+          </AdminField>
+          <AdminField label="Points">
+            <input
+              className={adminInputClass}
+              defaultValue={task?.points ?? 1}
+              min={0}
+              name="points"
+              type="number"
+            />
+          </AdminField>
+        </div>
+        <div className="mt-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-4 text-sm leading-6 text-slate-700">
+          <p className="font-semibold text-slate-900">{formatEnumLabel(selectedType)}</p>
+          <p className="mt-2">{currentGuide.summary}</p>
+          <p className="mt-3 text-xs uppercase tracking-[0.14em] text-slate-500">
+            {currentGuide.detailHint}
+          </p>
+        </div>
       </div>
-      <AdminField label="Description">
-        <textarea
-          className={adminInputClass}
-          defaultValue={task?.description ?? ""}
-          name="description"
-          required
-          rows={3}
-        />
-      </AdminField>
-      <div className="grid gap-3 sm:grid-cols-3">
-        <AdminField label="Type">
-          <select
-            className={adminInputClass}
-            defaultValue={task?.type ?? "SOCIAL_FOLLOW"}
-            name="type"
-          >
-            {taskTypes.map((type) => (
-              <option key={type} value={type}>
-                {type}
-              </option>
+
+      <div className="rounded-2xl bg-white/70 p-4">
+        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+          2. Review setup
+        </p>
+        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+          <AdminField label="Verification type">
+            {currentGuide.lockVerification ? (
+              <>
+                <input
+                  name="verificationType"
+                  type="hidden"
+                  value={selectedVerificationType}
+                />
+                <input
+                  className={adminInputClass}
+                  disabled
+                  value={formatEnumLabel(selectedVerificationType)}
+                />
+              </>
+            ) : (
+              <select
+                className={adminInputClass}
+                name="verificationType"
+                onChange={(event) =>
+                  setSelectedVerificationType(event.target.value)
+                }
+                value={selectedVerificationType}
+              >
+                {availableVerificationTypes.map((type) => (
+                  <option key={type} value={type}>
+                    {formatEnumLabel(type)}
+                  </option>
+                ))}
+              </select>
+            )}
+          </AdminField>
+          <label className="flex items-center gap-3 rounded-lg bg-white px-3 py-2 text-sm">
+            <input
+              defaultChecked={task?.isActive ?? true}
+              name="isActive"
+              type="checkbox"
+            />
+            Active
+          </label>
+          <label className="flex items-center gap-3 rounded-lg bg-white px-3 py-2 text-sm">
+            {currentGuide.lockRequiresVerification ? (
+              <input
+                name="requiresVerification"
+                type="hidden"
+                value={requiresVerification ? "on" : ""}
+              />
+            ) : null}
+            <input
+              checked={requiresVerification}
+              disabled={currentGuide.lockRequiresVerification}
+              name={currentGuide.lockRequiresVerification ? undefined : "requiresVerification"}
+              onChange={(event) => setRequiresVerification(event.target.checked)}
+              type="checkbox"
+            />
+            Requires verification
+          </label>
+        </div>
+      </div>
+
+      <div className="rounded-2xl bg-white/70 p-4">
+        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+          3. Participant-facing copy
+        </p>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <AdminField label="Title">
+            <input
+              className={adminInputClass}
+              defaultValue={task?.title ?? ""}
+              name="title"
+              required
+            />
+          </AdminField>
+          <AdminField label="Sort order">
+            <input
+              className={adminInputClass}
+              defaultValue={task?.sortOrder ?? 0}
+              name="sortOrder"
+              type="number"
+            />
+          </AdminField>
+        </div>
+        <div className="mt-3">
+          <AdminField label="Description">
+            <textarea
+              className={adminInputClass}
+              defaultValue={task?.description ?? ""}
+              name="description"
+              required
+              rows={3}
+            />
+          </AdminField>
+        </div>
+      </div>
+
+      <div className="rounded-2xl bg-white/70 p-4">
+        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+          4. Fill task details
+        </p>
+        <div className="mt-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-4">
+          <p className="text-sm font-semibold text-slate-900">What to set up</p>
+          <ol className="mt-3 space-y-3 text-sm leading-6 text-slate-700">
+            {currentGuide.setupSteps.map((step) => (
+              <li key={step}>{step}</li>
             ))}
-          </select>
-        </AdminField>
-        <AdminField label="Platform">
-          <select
-            className={adminInputClass}
-            defaultValue={task?.platform ?? "NONE"}
-            name="platform"
-          >
-            {platforms.map((platform) => (
-              <option key={platform} value={platform}>
-                {platform}
-              </option>
-            ))}
-          </select>
-        </AdminField>
-        <AdminField label="Points">
-          <input
-            className={adminInputClass}
-            defaultValue={task?.points ?? 1}
-            min={0}
-            name="points"
-            type="number"
-          />
-        </AdminField>
+          </ol>
+        </div>
       </div>
-      <div className="grid gap-3 sm:grid-cols-3">
-        <AdminField label="Verification type">
-          <select
-            className={adminInputClass}
-            defaultValue={task?.verificationType ?? "VISUAL_STAFF_CHECK"}
-            name="verificationType"
-          >
-            {verificationTypes.map((type) => (
-              <option key={type} value={type}>
-                {type}
-              </option>
-            ))}
-          </select>
-        </AdminField>
-        <label className="flex items-center gap-3 rounded-lg bg-white/70 px-3 py-2 text-sm">
-          <input
-            defaultChecked={task?.isActive ?? true}
-            name="isActive"
-            type="checkbox"
-          />
-          Active
-        </label>
-        <label className="flex items-center gap-3 rounded-lg bg-white/70 px-3 py-2 text-sm">
-          <input
-            defaultChecked={task?.requiresVerification ?? true}
-            name="requiresVerification"
-            type="checkbox"
-          />
-          Requires verification
-        </label>
-      </div>
-      <div className="rounded-2xl bg-white/70 p-4 text-sm text-slate-700">
-        Use `SOCIAL_COMMENT` with platform `FACEBOOK` for automatic comment verification.
-        Configure the post URL, Facebook post ID, required prefix, and enable auto verify.
-      </div>
+
       <div className="grid gap-3 sm:grid-cols-2">
         <AdminField label="Primary URL">
           <input
@@ -800,6 +1146,7 @@ function TaskForm({
             defaultValue={task?.configJson?.primaryUrl ?? ""}
             name="primaryUrl"
             type="url"
+            {...(isFacebookCommentPreset ? { required: true } : {})}
           />
         </AdminField>
         <AdminField label="Primary label">
@@ -809,75 +1156,99 @@ function TaskForm({
             name="primaryLabel"
           />
         </AdminField>
-        <AdminField label="Secondary URL">
-          <input
-            className={adminInputClass}
-            defaultValue={task?.configJson?.secondaryUrl ?? ""}
-            name="secondaryUrl"
-            type="url"
-          />
-        </AdminField>
-        <AdminField label="Secondary label">
-          <input
-            className={adminInputClass}
-            defaultValue={task?.configJson?.secondaryLabel ?? ""}
-            name="secondaryLabel"
-          />
-        </AdminField>
+        {currentGuide.showSecondaryLinkFields ? (
+          <>
+            <AdminField label="Secondary URL">
+              <input
+                className={adminInputClass}
+                defaultValue={task?.configJson?.secondaryUrl ?? ""}
+                name="secondaryUrl"
+                type="url"
+              />
+            </AdminField>
+            <AdminField label="Secondary label">
+              <input
+                className={adminInputClass}
+                defaultValue={task?.configJson?.secondaryLabel ?? ""}
+                name="secondaryLabel"
+              />
+            </AdminField>
+          </>
+        ) : null}
       </div>
-      <AdminField label="Proof hint">
-        <input
-          className={adminInputClass}
-          defaultValue={task?.configJson?.proofHint ?? ""}
-          name="proofHint"
-        />
-      </AdminField>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <AdminField label="Required prefix">
+      {currentGuide.showProofHint ? (
+        <AdminField label="Proof hint">
           <input
             className={adminInputClass}
-            defaultValue={task?.configJson?.requiredPrefix ?? ""}
-            name="requiredPrefix"
-            placeholder="QIANLU"
+            defaultValue={task?.configJson?.proofHint ?? ""}
+            name="proofHint"
           />
         </AdminField>
-        <AdminField label="Facebook post ID">
-          <input
-            className={adminInputClass}
-            defaultValue={task?.configJson?.facebookPostId ?? ""}
-            name="facebookPostId"
-            placeholder="pageid_postid"
-          />
-        </AdminField>
-      </div>
-      <AdminField label="Comment instructions">
-        <textarea
-          className={adminInputClass}
-          defaultValue={task?.configJson?.commentInstructions ?? ""}
-          name="commentInstructions"
-          rows={3}
-        />
-      </AdminField>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <label className="flex items-center gap-3 rounded-lg bg-white/70 px-3 py-2 text-sm">
-          <input name="hasRequireVerificationCode" type="hidden" value="1" />
-          <input
-            defaultChecked={task?.configJson?.requireVerificationCode ?? true}
-            name="requireVerificationCode"
-            type="checkbox"
-          />
-          Include participant verification code
-        </label>
-        <label className="flex items-center gap-3 rounded-lg bg-white/70 px-3 py-2 text-sm">
-          <input name="hasAutoVerify" type="hidden" value="1" />
-          <input
-            defaultChecked={task?.configJson?.autoVerify ?? false}
-            name="autoVerify"
-            type="checkbox"
-          />
-          Auto verify via webhook/API
-        </label>
-      </div>
+      ) : null}
+      {currentGuide.showFacebookCommentFields ? (
+        <>
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+            <p className="text-sm font-semibold text-emerald-900">
+              Facebook comment task setup
+            </p>
+            <p className="mt-2 text-sm leading-6 text-emerald-900">
+              This task will watch a single Facebook post on the connected Page
+              and automatically verify comments that match your prefix plus the
+              participant code.
+            </p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <AdminField label="Required prefix">
+              <input
+                className={adminInputClass}
+                defaultValue={task?.configJson?.requiredPrefix ?? ""}
+                name="requiredPrefix"
+                placeholder="QIANLU"
+                required
+              />
+            </AdminField>
+            <AdminField label="Facebook post ID">
+              <input
+                className={adminInputClass}
+                defaultValue={task?.configJson?.facebookPostId ?? ""}
+                name="facebookPostId"
+                placeholder="pageid_postid"
+                required
+              />
+            </AdminField>
+          </div>
+          <AdminField label="Comment instructions">
+            <textarea
+              className={adminInputClass}
+              defaultValue={task?.configJson?.commentInstructions ?? ""}
+              name="commentInstructions"
+              rows={3}
+            />
+          </AdminField>
+        </>
+      ) : null}
+      {currentGuide.showCommentAutomationOptions ? (
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="flex items-center gap-3 rounded-lg bg-white/70 px-3 py-2 text-sm">
+            <input name="hasRequireVerificationCode" type="hidden" value="1" />
+            <input
+              defaultChecked={task?.configJson?.requireVerificationCode ?? true}
+              name="requireVerificationCode"
+              type="checkbox"
+            />
+            Include participant verification code
+          </label>
+          <label className="flex items-center gap-3 rounded-lg bg-white/70 px-3 py-2 text-sm">
+            <input name="hasAutoVerify" type="hidden" value="1" />
+            <input
+              defaultChecked={task?.configJson?.autoVerify ?? true}
+              name="autoVerify"
+              type="checkbox"
+            />
+            Auto verify via webhook/API
+          </label>
+        </div>
+      ) : null}
       <Button type="submit">{buttonLabel}</Button>
     </Form>
   );
