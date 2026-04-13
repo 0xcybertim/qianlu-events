@@ -60,6 +60,14 @@ function getFacebookOauthStartUrl(eventSlug: string) {
   return `/admin/events/${encodeURIComponent(eventSlug)}/facebook-oauth/start`;
 }
 
+function formatFacebookSourceLabel(source: string) {
+  if (source === "user_accounts") return "/me/accounts";
+  if (source === "business_owned_pages") return "/{business-id}/owned_pages";
+  if (source === "business_client_pages") return "/{business-id}/client_pages";
+
+  return source;
+}
+
 function FacebookOnboardingCard({
   connection,
   connectStatus,
@@ -79,10 +87,23 @@ function FacebookOnboardingCard({
   latestFacebookDebug?: {
     consumedAt: string | null;
     createdAt: string;
+    discoveryWarnings: {
+      businessId: string | null;
+      businessName: string | null;
+      message: string;
+      stage:
+        | "business_client_pages"
+        | "business_owned_pages"
+        | "user_businesses";
+    }[];
     droppedPages: {
       pageId: string | null;
       pageName: string | null;
-      reason: "missing_access_token" | "missing_id" | "missing_name";
+      reason:
+        | "missing_access_token"
+        | "missing_id"
+        | "missing_name"
+        | "token_lookup_failed";
     }[];
     expiresAt: string;
     pages: {
@@ -91,8 +112,22 @@ function FacebookOnboardingCard({
     }[];
     rawPages: {
       accessTokenReturned: boolean;
+      businesses: {
+        businessId: string | null;
+        businessName: string | null;
+        permittedRoles: string[];
+      }[];
       pageId: string | null;
       pageName: string | null;
+      permittedTasks: string[];
+      sources: (
+        | "user_accounts"
+        | "business_owned_pages"
+        | "business_client_pages"
+      )[];
+      tasks: string[];
+      tokenLookupAttempted: boolean;
+      tokenLookupError: string | null;
     }[];
     state: string;
   } | null;
@@ -294,7 +329,7 @@ function FacebookOnboardingCard({
               .
             </p>
             <p>Returned Pages: {latestFacebookDebug.pages.length}</p>
-            <p>Raw assets from Meta: {latestFacebookDebug.rawPages.length}</p>
+            <p>Discovered assets across user and business endpoints: {latestFacebookDebug.rawPages.length}</p>
             {latestFacebookDebug.pages.length > 0 ? (
               <ul className="space-y-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] px-4 py-3">
                 {latestFacebookDebug.pages.map((page) => (
@@ -311,13 +346,70 @@ function FacebookOnboardingCard({
             {latestFacebookDebug.rawPages.length > 0 ? (
               <div className="space-y-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] px-4 py-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                  Raw assets returned by Meta
+                  Discovered assets and token lookups
                 </p>
                 <ul className="space-y-2">
                   {latestFacebookDebug.rawPages.map((page, index) => (
                     <li key={`${page.pageId ?? "unknown"}-${index}`} className="font-mono text-xs leading-6 text-slate-900">
-                      {(page.pageName ?? "Unnamed")} ({page.pageId ?? "no-id"}) | access token returned:{" "}
-                      {page.accessTokenReturned ? "yes" : "no"}
+                      <div>
+                        {(page.pageName ?? "Unnamed")} ({page.pageId ?? "no-id"}) | access token returned:{" "}
+                        {page.accessTokenReturned ? "yes" : "no"}
+                      </div>
+                      <div className="text-slate-600">
+                        source: {page.sources.map((source) => formatFacebookSourceLabel(source)).join(", ") || "unknown"}
+                      </div>
+                      {page.businesses.length > 0 ? (
+                        <div className="text-slate-600">
+                          businesses:{" "}
+                          {page.businesses
+                            .map((business) => {
+                              const label = business.businessName ?? "Unnamed business";
+                              const roles = business.permittedRoles.length > 0
+                                ? ` [roles: ${business.permittedRoles.join(", ")}]`
+                                : "";
+
+                              return `${label} (${business.businessId ?? "no-id"})${roles}`;
+                            })
+                            .join(" | ")}
+                        </div>
+                      ) : null}
+                      {page.tasks.length > 0 ? (
+                        <div className="text-slate-600">
+                          page tasks: {page.tasks.join(", ")}
+                        </div>
+                      ) : null}
+                      {page.permittedTasks.length > 0 ? (
+                        <div className="text-slate-600">
+                          business permitted tasks: {page.permittedTasks.join(", ")}
+                        </div>
+                      ) : null}
+                      {page.tokenLookupAttempted ? (
+                        <div className="text-slate-600">
+                          page token lookup attempted
+                          {page.tokenLookupError
+                            ? `, error: ${page.tokenLookupError}`
+                            : ""}
+                        </div>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {latestFacebookDebug.discoveryWarnings.length > 0 ? (
+              <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-800">
+                  Discovery warnings
+                </p>
+                <ul className="space-y-2 text-xs leading-6 text-amber-900">
+                  {latestFacebookDebug.discoveryWarnings.map((warning, index) => (
+                    <li key={`${warning.stage}-${warning.businessId ?? "none"}-${index}`}>
+                      {warning.stage}
+                      {warning.businessName || warning.businessId
+                        ? ` | ${warning.businessName ?? "Unnamed business"} (${warning.businessId ?? "no-id"})`
+                        : ""}
+                      {" | "}
+                      {warning.message}
                     </li>
                   ))}
                 </ul>
@@ -353,11 +445,12 @@ function FacebookOnboardingCard({
         <ol className="mt-3 space-y-3 text-sm leading-6 text-slate-700">
           <li>1. Open your Meta app in Meta for Developers and add the Webhooks product.</li>
           <li>2. In `Facebook Login for Business`, use the `User access token` configuration with `business_management`, `pages_show_list`, `pages_read_engagement`, and `pages_manage_metadata`.</li>
-          <li>3. Choose the `Page` object and subscribe your app to it.</li>
-          <li>4. Paste the callback URL shown above and verify it with the same verify token value.</li>
-          <li>5. Subscribe the Page webhook to the `feed` field so Page comment events reach this app.</li>
-          <li>6. Use the `Connect Facebook Page` button above and sign in with the organizer&apos;s Meta account.</li>
-          <li>7. Copy the target Facebook post URL and its Graph API post ID for the task below.</li>
+          <li>3. If the Page sits inside a Meta business portfolio, the connecting person must still have Page-level tasks or role access so Meta can return a Page access token.</li>
+          <li>4. Choose the `Page` object and subscribe your app to it.</li>
+          <li>5. Paste the callback URL shown above and verify it with the same verify token value.</li>
+          <li>6. Subscribe the Page webhook to the `feed` field so Page comment events reach this app.</li>
+          <li>7. Use the `Connect Facebook Page` button above and sign in with the organizer&apos;s Meta account.</li>
+          <li>8. Copy the target Facebook post URL and its Graph API post ID for the task below.</li>
         </ol>
       </div>
 

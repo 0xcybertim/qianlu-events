@@ -52,9 +52,20 @@ Each client event should store its own Facebook Page connection in the database:
 - Facebook Page access token
 
 The organizer task screen now starts a Meta OAuth flow, then lets the organizer
-pick one of the Facebook Pages returned by Meta for that event. The selected
-Page ID and Page access token are stored server-side for that event. Task-level
-Facebook post settings still live in the task config itself.
+pick one of the Facebook Pages returned by Meta for that event. Page discovery
+now expands beyond `/me/accounts`:
+
+1. The backend exchanges the OAuth code for a user access token.
+2. It reads `/me/accounts` for Pages where Meta already returns a Page token.
+3. It reads `/me/businesses`.
+4. For each business, it reads `/{business-id}/owned_pages` and
+   `/{business-id}/client_pages`.
+5. For every discovered Page candidate, it requests `/{page-id}` with
+   `fields=id,name,access_token,tasks` to see whether Meta will issue a Page
+   access token for that user.
+
+The selected Page ID and Page access token are stored server-side for that
+event. Task-level Facebook post settings still live in the task config itself.
 
 ## Facebook setup checklist
 
@@ -69,9 +80,12 @@ Facebook post settings still live in the task config itself.
    - `pages_show_list`
    - `pages_read_engagement`
    - `pages_manage_metadata`
-8. Use the `Connect Facebook Page` button in the event task screen and finish the Meta login flow.
-9. If Meta returns multiple Pages, choose the correct Page in the organizer UI.
-10. Use the Graph API post ID from the target Facebook post in the task config.
+8. If the target Page is business-managed, make sure the connecting person has
+   actual Page tasks / role access. Business visibility by itself is not enough
+   for Meta to return the Page `access_token`.
+9. Use the `Connect Facebook Page` button in the event task screen and finish the Meta login flow.
+10. If Meta returns multiple Pages, choose the correct Page in the organizer UI.
+11. Use the Graph API post ID from the target Facebook post in the task config.
 
 ## Safety and idempotency
 
@@ -86,3 +100,8 @@ Facebook post settings still live in the task config itself.
 - The fallback Graph lookup reads comments for one configured Facebook post at a time.
 - Matching currently assumes a single verification code token after the configured prefix.
 - Local development can simulate webhook delivery, but real end-to-end verification still requires a properly configured Meta app, Page subscription, and access token.
+- If a business-managed Page can be discovered through the business edges but
+  Meta still refuses to return a Page access token, the connecting user is
+  missing Page-level access. In that case the business must either assign the
+  required Page tasks to that user or move to a business system-user setup for
+  server-to-server access.

@@ -34,10 +34,18 @@ type FacebookOAuthTokenResponse = {
   access_token?: string;
 };
 
-export type FacebookManagedPage = {
+type FacebookManagedPage = {
   access_token?: string;
   id?: string;
   name?: string;
+  permitted_tasks?: string[];
+  tasks?: string[];
+};
+
+type FacebookBusiness = {
+  id?: string;
+  name?: string;
+  permitted_roles?: string[];
 };
 
 export type FacebookPageConnectionOption = {
@@ -46,10 +54,44 @@ export type FacebookPageConnectionOption = {
   pageName: string;
 };
 
+export type FacebookManagedPageSource =
+  | "user_accounts"
+  | "business_owned_pages"
+  | "business_client_pages";
+
+export type FacebookManagedPageBusiness = {
+  businessId: string | null;
+  businessName: string | null;
+  permittedRoles: string[];
+};
+
+export type FacebookManagedPageDebug = {
+  accessTokenReturned: boolean;
+  businesses: FacebookManagedPageBusiness[];
+  pageId: string | null;
+  pageName: string | null;
+  permittedTasks: string[];
+  sources: FacebookManagedPageSource[];
+  tasks: string[];
+  tokenLookupAttempted: boolean;
+  tokenLookupError: string | null;
+};
+
 export type FacebookManagedPageDrop = {
   pageId: string | null;
   pageName: string | null;
-  reason: "missing_access_token" | "missing_id" | "missing_name";
+  reason:
+    | "missing_access_token"
+    | "missing_id"
+    | "missing_name"
+    | "token_lookup_failed";
+};
+
+export type FacebookManagedPageDiscoveryWarning = {
+  businessId: string | null;
+  businessName: string | null;
+  message: string;
+  stage: "business_client_pages" | "business_owned_pages" | "user_businesses";
 };
 
 function buildGraphUrl(path: string, params?: Record<string, string>) {
@@ -78,9 +120,27 @@ async function facebookGraphRequest<T>(
   });
 
   if (!response.ok) {
-    throw new Error(
-      `Facebook Graph API request failed with ${response.status}.`,
-    );
+    let details = `Facebook Graph API request failed with ${response.status}.`;
+
+    try {
+      const payload = (await response.json()) as {
+        error?: {
+          code?: number;
+          message?: string;
+          type?: string;
+        };
+      };
+
+      if (payload.error?.message) {
+        details = `${details} ${payload.error.message}`;
+      } else if (payload.error?.type || payload.error?.code) {
+        details = `${details} ${payload.error.type ?? "GraphError"} (${payload.error.code ?? "unknown"}).`;
+      }
+    } catch {
+      // Keep the generic error message when Meta does not return JSON.
+    }
+
+    throw new Error(details);
   }
 
   return (await response.json()) as T;
@@ -147,13 +207,75 @@ export async function fetchFacebookManagedPages(userAccessToken: string) {
   const response = await facebookGraphRequest<{
     data?: FacebookManagedPage[];
   }>("/me/accounts", userAccessToken, {
-    fields: "id,name,access_token",
+    fields: "id,name,access_token,tasks",
     limit: "100",
   });
 
   const rawPages = response?.data ?? [];
+  const rawDebugPages: FacebookManagedPageDebug[] = [];
   const usablePages: FacebookPageConnectionOption[] = [];
   const droppedPages: FacebookManagedPageDrop[] = [];
+  const discoveryWarnings: FacebookManagedPageDiscoveryWarning[] = [];
+  const byPageId = new Map<
+    string,
+    {
+      accessToken?: string;
+      businesses: FacebookManagedPageBusiness[];
+      pageId: string;
+      pageName?: string;
+      permittedTasks: Set<string>;
+      sources: Set<FacebookManagedPageSource>;
+      tasks: Set<string>;
+      tokenLookupAttempted: boolean;
+      tokenLookupError: string | null;
+    }
+  >();
+
+  function ensureCandidate(args: {
+    accessToken?: string;
+    business?: FacebookManagedPageBusiness | null;
+    pageId: string;
+    pageName?: string;
+    permittedTasks?: string[];
+    source: FacebookManagedPageSource;
+    tasks?: string[];
+  }) {
+    const existing = byPageId.get(args.pageId) ?? {
+      businesses: [],
+      pageId: args.pageId,
+      permittedTasks: new Set<string>(),
+      sources: new Set<FacebookManagedPageSource>(),
+      tasks: new Set<string>(),
+      tokenLookupAttempted: false,
+      tokenLookupError: null,
+    };
+
+    existing.pageName = existing.pageName ?? args.pageName;
+    existing.accessToken = existing.accessToken ?? args.accessToken;
+    existing.sources.add(args.source);
+
+    for (const task of args.tasks ?? []) {
+      existing.tasks.add(task);
+    }
+
+    for (const task of args.permittedTasks ?? []) {
+      existing.permittedTasks.add(task);
+    }
+
+    if (args.business) {
+      const hasBusiness = existing.businesses.some(
+        (business) =>
+          business.businessId === args.business?.businessId &&
+          business.businessName === args.business?.businessName,
+      );
+
+      if (!hasBusiness) {
+        existing.businesses.push(args.business);
+      }
+    }
+
+    byPageId.set(args.pageId, existing);
+  }
 
   for (const page of rawPages) {
     if (!page.id) {
@@ -165,34 +287,192 @@ export async function fetchFacebookManagedPages(userAccessToken: string) {
       continue;
     }
 
-    if (!page.name) {
+    ensureCandidate({
+      accessToken: page.access_token,
+      pageId: page.id,
+      pageName: page.name,
+      source: "user_accounts",
+      tasks: page.tasks,
+    });
+  }
+
+  try {
+    const businessesResponse = await facebookGraphRequest<{
+      data?: FacebookBusiness[];
+    }>("/me/businesses", userAccessToken, {
+      fields: "id,name,permitted_roles",
+      limit: "100",
+    });
+    const businesses = businessesResponse?.data ?? [];
+
+    for (const business of businesses) {
+      if (!business.id) {
+        continue;
+      }
+
+      const businessSummary: FacebookManagedPageBusiness = {
+        businessId: business.id,
+        businessName: business.name ?? null,
+        permittedRoles: business.permitted_roles ?? [],
+      };
+
+      const businessEdges: Array<{
+        fields: string;
+        path: string;
+        source: FacebookManagedPageSource;
+        stage: FacebookManagedPageDiscoveryWarning["stage"];
+      }> = [
+        {
+          fields: "id,name",
+          path: `/${encodeURIComponent(business.id)}/owned_pages`,
+          source: "business_owned_pages",
+          stage: "business_owned_pages",
+        },
+        {
+          fields: "id,name,permitted_tasks",
+          path: `/${encodeURIComponent(business.id)}/client_pages`,
+          source: "business_client_pages",
+          stage: "business_client_pages",
+        },
+      ];
+
+      for (const edge of businessEdges) {
+        try {
+          const pagesResponse = await facebookGraphRequest<{
+            data?: FacebookManagedPage[];
+          }>(edge.path, userAccessToken, {
+            fields: edge.fields,
+            limit: "100",
+          });
+
+          for (const page of pagesResponse?.data ?? []) {
+            if (!page.id) {
+              droppedPages.push({
+                pageId: null,
+                pageName: page.name ?? null,
+                reason: "missing_id",
+              });
+              continue;
+            }
+
+            ensureCandidate({
+              business: businessSummary,
+              pageId: page.id,
+              pageName: page.name,
+              permittedTasks: page.permitted_tasks,
+              source: edge.source,
+            });
+          }
+        } catch (error) {
+          discoveryWarnings.push({
+            businessId: businessSummary.businessId,
+            businessName: businessSummary.businessName,
+            message:
+              error instanceof Error
+                ? error.message
+                : "Facebook business page discovery failed.",
+            stage: edge.stage,
+          });
+        }
+      }
+    }
+  } catch (error) {
+    discoveryWarnings.push({
+      businessId: null,
+      businessName: null,
+      message:
+        error instanceof Error
+          ? error.message
+          : "Facebook business discovery failed.",
+      stage: "user_businesses",
+    });
+  }
+
+  const candidates = [...byPageId.values()];
+
+  await Promise.all(
+    candidates.map(async (candidate) => {
+      if (candidate.accessToken && candidate.pageName) {
+        return;
+      }
+
+      candidate.tokenLookupAttempted = true;
+
+      try {
+        const page = await facebookGraphRequest<FacebookManagedPage>(
+          `/${encodeURIComponent(candidate.pageId)}`,
+          userAccessToken,
+          {
+            fields: "id,name,access_token,tasks",
+          },
+        );
+
+        if (page?.name) {
+          candidate.pageName = page.name;
+        }
+
+        if (page?.access_token) {
+          candidate.accessToken = page.access_token;
+        }
+
+        for (const task of page?.tasks ?? []) {
+          candidate.tasks.add(task);
+        }
+      } catch (error) {
+        candidate.tokenLookupError =
+          error instanceof Error
+            ? error.message
+            : "Facebook Page token lookup failed.";
+      }
+    }),
+  );
+
+  for (const candidate of candidates) {
+    const pageName = candidate.pageName ?? null;
+
+    rawDebugPages.push({
+      accessTokenReturned: Boolean(candidate.accessToken),
+      businesses: candidate.businesses,
+      pageId: candidate.pageId,
+      pageName,
+      permittedTasks: [...candidate.permittedTasks].sort(),
+      sources: [...candidate.sources].sort(),
+      tasks: [...candidate.tasks].sort(),
+      tokenLookupAttempted: candidate.tokenLookupAttempted,
+      tokenLookupError: candidate.tokenLookupError,
+    });
+
+    if (!pageName) {
       droppedPages.push({
-        pageId: page.id,
+        pageId: candidate.pageId,
         pageName: null,
         reason: "missing_name",
       });
       continue;
     }
 
-    if (!page.access_token) {
+    if (!candidate.accessToken) {
       droppedPages.push({
-        pageId: page.id,
-        pageName: page.name,
-        reason: "missing_access_token",
+        pageId: candidate.pageId,
+        pageName,
+        reason: candidate.tokenLookupError
+          ? "token_lookup_failed"
+          : "missing_access_token",
       });
       continue;
     }
 
     usablePages.push({
-      pageAccessToken: page.access_token,
-      pageId: page.id,
-      pageName: page.name,
+      pageAccessToken: candidate.accessToken,
+      pageId: candidate.pageId,
+      pageName,
     });
   }
 
   return {
+    discoveryWarnings,
     droppedPages,
-    rawPages,
+    rawPages: rawDebugPages,
     usablePages,
   };
 }

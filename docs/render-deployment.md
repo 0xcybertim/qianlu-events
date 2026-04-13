@@ -140,6 +140,9 @@ verify token.
 9. In the Qianlu admin UI, open the event task page and use `Connect Facebook
    Page` to complete organizer OAuth and save the event-specific Page
    connection.
+10. If the Page is inside a Meta business portfolio, ensure the connecting
+    organizer has Page-level tasks / role access so Meta can return a Page
+    access token after discovery.
 
 ## Redeploy behavior
 

@@ -519,18 +519,57 @@ const facebookPendingPageOptionSchema = z.object({
 });
 
 const facebookOauthStoredPageSchema = z.object({
-  id: z.string().optional(),
-  name: z.string().optional(),
-  access_token: z.string().optional(),
+  accessTokenReturned: z.boolean().default(false),
+  businesses: z
+    .array(
+      z.object({
+        businessId: z.string().nullable(),
+        businessName: z.string().nullable(),
+        permittedRoles: z.array(z.string()).default([]),
+      }),
+    )
+    .default([]),
+  pageId: z.string().nullable(),
+  pageName: z.string().nullable(),
+  permittedTasks: z.array(z.string()).default([]),
+  sources: z
+    .array(
+      z.enum([
+        "user_accounts",
+        "business_owned_pages",
+        "business_client_pages",
+      ]),
+    )
+    .default([]),
+  tasks: z.array(z.string()).default([]),
+  tokenLookupAttempted: z.boolean().default(false),
+  tokenLookupError: z.string().nullable().default(null),
 });
 
 const facebookOauthDroppedPageSchema = z.object({
   pageId: z.string().nullable(),
   pageName: z.string().nullable(),
-  reason: z.enum(["missing_access_token", "missing_id", "missing_name"]),
+  reason: z.enum([
+    "missing_access_token",
+    "missing_id",
+    "missing_name",
+    "token_lookup_failed",
+  ]),
+});
+
+const facebookOauthDiscoveryWarningSchema = z.object({
+  businessId: z.string().nullable(),
+  businessName: z.string().nullable(),
+  message: z.string(),
+  stage: z.enum([
+    "business_client_pages",
+    "business_owned_pages",
+    "user_businesses",
+  ]),
 });
 
 const facebookOauthStoredDebugSchema = z.object({
+  discoveryWarnings: z.array(facebookOauthDiscoveryWarningSchema).default([]),
   usablePages: z.array(facebookPendingPageOptionSchema).default([]),
   rawPages: z.array(facebookOauthStoredPageSchema).default([]),
   droppedPages: z.array(facebookOauthDroppedPageSchema).default([]),
@@ -582,6 +621,7 @@ function parseFacebookOauthStoredDebug(value: Prisma.JsonValue | null) {
   }
 
   return {
+    discoveryWarnings: [],
     droppedPages: [],
     rawPages: [],
     usablePages: parsePendingFacebookPageOptions(value),
@@ -630,15 +670,12 @@ function serializeFacebookOauthDebugState(
     createdAt: state.createdAt.toISOString(),
     consumedAt: state.consumedAt?.toISOString() ?? null,
     expiresAt: state.expiresAt.toISOString(),
+    discoveryWarnings: parseFacebookOauthStoredDebug(state.pageOptionsJson).discoveryWarnings,
     pages: parseFacebookOauthStoredDebug(state.pageOptionsJson).usablePages.map((page) => ({
       pageId: page.pageId,
       pageName: page.pageName,
     })),
-    rawPages: parseFacebookOauthStoredDebug(state.pageOptionsJson).rawPages.map((page) => ({
-      accessTokenReturned: Boolean(page.access_token),
-      pageId: page.id ?? null,
-      pageName: page.name ?? null,
-    })),
+    rawPages: parseFacebookOauthStoredDebug(state.pageOptionsJson).rawPages,
     droppedPages: parseFacebookOauthStoredDebug(state.pageOptionsJson).droppedPages,
     state: state.state,
   };

@@ -347,19 +347,54 @@ export const adminFacebookConnectionDebugSchema = z.object({
   createdAt: z.string(),
   consumedAt: z.string().nullable(),
   expiresAt: z.string(),
+  discoveryWarnings: z.array(
+    z.object({
+      businessId: z.string().nullable(),
+      businessName: z.string().nullable(),
+      message: z.string(),
+      stage: z.enum([
+        "business_client_pages",
+        "business_owned_pages",
+        "user_businesses",
+      ]),
+    }),
+  ),
   pages: z.array(adminFacebookPageOptionSchema),
   rawPages: z.array(
     z.object({
       accessTokenReturned: z.boolean(),
+      businesses: z.array(
+        z.object({
+          businessId: z.string().nullable(),
+          businessName: z.string().nullable(),
+          permittedRoles: z.array(z.string()),
+        }),
+      ),
       pageId: z.string().nullable(),
       pageName: z.string().nullable(),
+      permittedTasks: z.array(z.string()),
+      sources: z.array(
+        z.enum([
+          "user_accounts",
+          "business_owned_pages",
+          "business_client_pages",
+        ]),
+      ),
+      tasks: z.array(z.string()),
+      tokenLookupAttempted: z.boolean(),
+      tokenLookupError: z.string().nullable(),
     }),
   ),
   droppedPages: z.array(
     z.object({
       pageId: z.string().nullable(),
       pageName: z.string().nullable(),
-      reason: z.enum(["missing_access_token", "missing_id", "missing_name"]),
+      reason: z.enum([
+        "missing_access_token",
+        "missing_id",
+        "missing_name",
+        "token_lookup_failed",
+      ]),
     }),
   ),
   state: z.string(),

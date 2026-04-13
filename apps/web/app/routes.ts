@@ -2,6 +2,7 @@ import { type RouteConfig, index, route } from "@react-router/dev/routes";
 
 export default [
   index("routes/home.tsx"),
+  route("privacy", "routes/privacy.tsx"),
   route("admin", "routes/admin.tsx"),
   route("admin/events", "routes/admin-events.tsx"),
   route("admin/events/:eventSlug", "routes/admin-event.tsx"),
