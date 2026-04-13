@@ -11,7 +11,7 @@ import {
   adminFacebookConnectionUpsertBodySchema,
   adminEventUpdateBodySchema,
   adminQrCodeCreateBodySchema,
-  adminTaskCreateBodySchema,
+  adminTaskCreateBodyWithFacebookSourceSchema,
   adminTaskUpdateBodySchema,
   eventSettingsSchema,
   facebookCommentTaskConfigSchema,
@@ -375,7 +375,7 @@ async function createDefaultQrCodeForStampTask(task: {
 
 function toTaskCreateData(
   eventId: string,
-  body: z.infer<typeof adminTaskCreateBodySchema>,
+  body: z.infer<typeof adminTaskCreateBodyWithFacebookSourceSchema>,
 ) {
   const facebookCommentConfig =
     body.type === "SOCIAL_COMMENT" && body.platform === "FACEBOOK"
@@ -723,6 +723,45 @@ function serializeFacebookOauthDebugState(
     droppedPages: parseFacebookOauthStoredDebug(state.pageOptionsJson).droppedPages,
     state: state.state,
   };
+}
+
+async function loadLatestUsableFacebookPagesForEvent(eventId: string) {
+  const state = await findLatestFacebookOauthStateForEvent(eventId);
+
+  return parseFacebookOauthStoredDebug(state?.pageOptionsJson ?? null).usablePages;
+}
+
+async function syncEventFacebookConnectionFromSelection(args: {
+  eventId: string;
+  pageId?: string | null;
+}) {
+  if (!args.pageId) {
+    return;
+  }
+
+  const usablePages = await loadLatestUsableFacebookPagesForEvent(args.eventId);
+  const selectedPage = usablePages.find((page) => page.pageId === args.pageId);
+
+  if (!selectedPage) {
+    throw new Error("Selected Facebook Page is no longer available from the latest OAuth session.");
+  }
+
+  await prisma.eventFacebookConnection.upsert({
+    where: {
+      eventId: args.eventId,
+    },
+    update: {
+      pageAccessToken: selectedPage.pageAccessToken,
+      pageId: selectedPage.pageId,
+      pageName: selectedPage.pageName,
+    },
+    create: {
+      eventId: args.eventId,
+      pageAccessToken: selectedPage.pageAccessToken,
+      pageId: selectedPage.pageId,
+      pageName: selectedPage.pageName,
+    },
+  });
 }
 
 async function findPendingFacebookOauthState(args: {
@@ -1389,57 +1428,68 @@ export function registerAdminRoutes(app: FastifyInstance) {
     });
 
     if (!access || "message" in access) {
-      return access ?? { connectedPageId: null, connectedPageName: null, error: null, posts: [] };
+      return access ?? { error: null, pages: [], selectedPageId: null };
     }
 
-    const connection = access.event.facebookConnection;
+    const usablePages = await loadLatestUsableFacebookPagesForEvent(access.event.id);
 
-    if (!connection?.pageId || !connection.pageAccessToken) {
+    if (usablePages.length === 0) {
       return {
-        connectedPageId: connection?.pageId ?? null,
-        connectedPageName: connection?.pageName ?? null,
-        error: "Connect a Facebook Page for this event before selecting a post.",
-        posts: [],
+        error:
+          "Run Facebook Page connect once before selecting a source Page and post.",
+        pages: [],
+        selectedPageId: access.event.facebookConnection?.pageId ?? null,
       };
     }
 
+    const selectedPageId =
+      access.event.facebookConnection?.pageId ?? usablePages[0]?.pageId ?? null;
+
     try {
-      const posts = await fetchFacebookPagePosts(
-        connection.pageId,
-        connection.pageAccessToken,
+      const pages = await Promise.all(
+        usablePages.map(async (page) => {
+          const posts = await fetchFacebookPagePosts(
+            page.pageId,
+            page.pageAccessToken,
+          );
+
+          return {
+            pageId: page.pageId,
+            pageName: page.pageName,
+            posts: posts.map((post) => ({
+              createdAt: post.created_time ?? null,
+              messagePreview:
+                (post.message ?? post.story ?? "").trim().slice(0, 140) ||
+                `Facebook post ${post.id}`,
+              permalinkUrl: post.permalink_url ?? null,
+              postId: post.id,
+            })),
+          };
+        }),
       );
 
       return {
-        connectedPageId: connection.pageId,
-        connectedPageName: connection.pageName ?? null,
         error: null,
-        posts: posts.map((post) => ({
-          createdAt: post.created_time ?? null,
-          messagePreview:
-            (post.message ?? post.story ?? "").trim().slice(0, 140) ||
-            `Facebook post ${post.id}`,
-          permalinkUrl: post.permalink_url ?? null,
-          postId: post.id,
-        })),
+        pages,
+        selectedPageId,
       };
     } catch (error) {
       request.log.warn(
         {
           error,
           eventId: access.event.id,
-          pageId: connection.pageId,
+          pageId: selectedPageId,
         },
-        "Could not load Facebook post options for admin task form.",
+        "Could not load Facebook source page post options for admin task form.",
       );
 
       return {
-        connectedPageId: connection.pageId,
-        connectedPageName: connection.pageName ?? null,
         error:
           error instanceof Error
             ? error.message
-            : "Could not load recent Facebook posts for the connected Page.",
-        posts: [],
+            : "Could not load recent Facebook posts for the available Pages.",
+        pages: [],
+        selectedPageId,
       };
     }
   });
@@ -1840,7 +1890,15 @@ export function registerAdminRoutes(app: FastifyInstance) {
         return access ?? { message: "Admin authentication required." };
       }
 
-      const body = adminTaskCreateBodySchema.parse(request.body);
+      const body = adminTaskCreateBodyWithFacebookSourceSchema.parse(request.body);
+
+      if (body.type === "SOCIAL_COMMENT" && body.platform === "FACEBOOK") {
+        await syncEventFacebookConnectionFromSelection({
+          eventId: access.event.id,
+          pageId: body.facebookSourcePageId ?? null,
+        });
+      }
+
       const task = await prisma.task.create({
         data: toTaskCreateData(access.event.id, body),
       });
@@ -1867,7 +1925,6 @@ export function registerAdminRoutes(app: FastifyInstance) {
         return access ?? { message: "Admin authentication required." };
       }
 
-      const body = adminTaskUpdateBodySchema.parse(request.body);
       const task = await prisma.task.findFirst({
         where: {
           id: request.params.taskId,
@@ -1881,6 +1938,18 @@ export function registerAdminRoutes(app: FastifyInstance) {
         return {
           message: "Task not found.",
         };
+      }
+
+      const body = adminTaskUpdateBodySchema.parse(request.body);
+
+      if (
+        (body.type ?? task.type) === "SOCIAL_COMMENT" &&
+        (body.platform ?? task.platform) === "FACEBOOK"
+      ) {
+        await syncEventFacebookConnectionFromSelection({
+          eventId: access.event.id,
+          pageId: body.facebookSourcePageId ?? null,
+        });
       }
 
       const updatedTask = await prisma.task.update({

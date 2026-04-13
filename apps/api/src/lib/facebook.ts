@@ -868,7 +868,7 @@ export async function fetchFacebookPagePosts(
   const response = await facebookGraphRequest<{
     data?: FacebookGraphPost[];
   }>(
-    `/${encodeURIComponent(pageId)}/posts`,
+    `/${encodeURIComponent(pageId)}/published_posts`,
     accessToken,
     {
       fields: "id,message,story,created_time,permalink_url",

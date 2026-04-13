@@ -813,6 +813,7 @@ function parseTaskForm(formData: FormData) {
     isActive: formData.get("isActive") === "on",
     requiresVerification: formData.get("requiresVerification") === "on",
     verificationType: formData.get("verificationType")?.toString() ?? "NONE",
+    facebookSourcePageId: readOptional(formData, "facebookSourcePageId"),
     configJson: Object.keys(compactConfig).length > 0 ? compactConfig : null,
   };
 }
@@ -915,15 +916,18 @@ function TaskForm({
 }: {
   buttonLabel: string;
   facebookPostOptions: {
-    connectedPageId: string | null;
-    connectedPageName: string | null;
     error: string | null;
-    posts: {
-      createdAt: string | null;
-      messagePreview: string;
-      permalinkUrl: string | null;
-      postId: string;
-    }[];
+    selectedPageId: string | null;
+    pages: Array<{
+      pageId: string;
+      pageName: string;
+      posts: {
+        createdAt: string | null;
+        messagePreview: string;
+        permalinkUrl: string | null;
+        postId: string;
+      }[];
+    }>;
   };
   intent: "create" | "update";
   task?: {
@@ -973,9 +977,24 @@ function TaskForm({
     : currentGuide.allowedVerificationTypes;
   const isFacebookCommentPreset =
     selectedType === "SOCIAL_COMMENT" && selectedPlatform === "FACEBOOK";
+  const availableFacebookPages = facebookPostOptions.pages;
+  const initialSourcePageId =
+    task?.configJson?.facebookPostId && availableFacebookPages.some((page) =>
+      page.posts.some((post) => post.postId === task.configJson?.facebookPostId),
+    )
+      ? (availableFacebookPages.find((page) =>
+          page.posts.some((post) => post.postId === task.configJson?.facebookPostId),
+        )?.pageId ?? facebookPostOptions.selectedPageId ?? "")
+      : (facebookPostOptions.selectedPageId ?? availableFacebookPages[0]?.pageId ?? "");
+  const [selectedFacebookPageId, setSelectedFacebookPageId] = useState(
+    initialSourcePageId,
+  );
+  const selectedFacebookPage =
+    availableFacebookPages.find((page) => page.pageId === selectedFacebookPageId) ??
+    null;
   const initialSavedPostId = task?.configJson?.facebookPostId ?? "";
   const matchingSavedPost =
-    facebookPostOptions.posts.find((post) => post.postId === initialSavedPostId) ??
+    selectedFacebookPage?.posts.find((post) => post.postId === initialSavedPostId) ??
     null;
   const [manualFacebookPostEntry, setManualFacebookPostEntry] = useState(
     initialSavedPostId.length > 0 && !matchingSavedPost,
@@ -991,7 +1010,7 @@ function TaskForm({
   );
   const selectedFacebookPost =
     selectedFacebookPostId.length > 0
-      ? facebookPostOptions.posts.find((post) => post.postId === selectedFacebookPostId) ??
+      ? selectedFacebookPage?.posts.find((post) => post.postId === selectedFacebookPostId) ??
         null
       : null;
 
@@ -1008,11 +1027,28 @@ function TaskForm({
     setSelectedFacebookPostId(nextPostId);
 
     const selectedPost =
-      facebookPostOptions.posts.find((post) => post.postId === nextPostId) ??
+      selectedFacebookPage?.posts.find((post) => post.postId === nextPostId) ??
       null;
 
     setFacebookPostIdValue(selectedPost?.postId ?? "");
     setFacebookPrimaryUrlValue(selectedPost?.permalinkUrl ?? "");
+  }
+
+  function handleFacebookPageSelect(nextPageId: string) {
+    setSelectedFacebookPageId(nextPageId);
+
+    const nextPage =
+      availableFacebookPages.find((page) => page.pageId === nextPageId) ?? null;
+
+    setSelectedFacebookPostId("");
+    setFacebookPostIdValue("");
+    setFacebookPrimaryUrlValue("");
+
+    if (nextPage?.posts[0] && !manualFacebookPostEntry) {
+      setSelectedFacebookPostId(nextPage.posts[0].postId);
+      setFacebookPostIdValue(nextPage.posts[0].postId);
+      setFacebookPrimaryUrlValue(nextPage.posts[0].permalinkUrl ?? "");
+    }
   }
 
   return (
@@ -1259,18 +1295,36 @@ function TaskForm({
               Source Page and post
             </p>
             <p className="mt-2 text-sm leading-6 text-slate-700">
-              The task reads posts from the event&apos;s connected Facebook
-              Page.
-              {facebookPostOptions.connectedPageName
-                ? ` Current source: ${facebookPostOptions.connectedPageName}${facebookPostOptions.connectedPageId ? ` (${facebookPostOptions.connectedPageId})` : ""}.`
-                : " No connected Page is available yet."}
+              Choose the Page first, then choose one of its published posts.
+              Saving the task will also sync the event&apos;s connected Page to
+              the selected source Page.
             </p>
             {facebookPostOptions.error ? (
               <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
                 {facebookPostOptions.error}
               </p>
             ) : null}
-            {!manualFacebookPostEntry && facebookPostOptions.posts.length > 0 ? (
+            {availableFacebookPages.length > 0 ? (
+              <div className="mt-4 space-y-3">
+                <AdminField label="Choose source Facebook Page">
+                  <select
+                    className={adminInputClass}
+                    name="facebookSourcePageId"
+                    onChange={(event) => handleFacebookPageSelect(event.target.value)}
+                    required
+                    value={selectedFacebookPageId}
+                  >
+                    <option value="">Select a Facebook Page</option>
+                    {availableFacebookPages.map((page) => (
+                      <option key={page.pageId} value={page.pageId}>
+                        {page.pageName} ({page.pageId})
+                      </option>
+                    ))}
+                  </select>
+                </AdminField>
+              </div>
+            ) : null}
+            {!manualFacebookPostEntry && (selectedFacebookPage?.posts.length ?? 0) > 0 ? (
               <div className="mt-4 space-y-3">
                 <AdminField label="Choose recent post from connected Page">
                   <select
@@ -1280,7 +1334,7 @@ function TaskForm({
                     value={selectedFacebookPostId}
                   >
                     <option value="">Select a Facebook post</option>
-                    {facebookPostOptions.posts.map((post) => (
+                    {selectedFacebookPage?.posts.map((post) => (
                       <option key={post.postId} value={post.postId}>
                         {post.createdAt
                           ? `${new Intl.DateTimeFormat("en", {
@@ -1326,20 +1380,25 @@ function TaskForm({
                   Manual entry is a fallback. The post picker is safer because
                   it stores the real Graph post ID from the connected Page.
                 </p>
-                {facebookPostOptions.posts.length > 0 ? (
+                {(selectedFacebookPage?.posts.length ?? 0) > 0 ? (
                   <button
                     className="text-sm font-semibold text-slate-900 underline"
                     onClick={() => {
                       setManualFacebookPostEntry(false);
 
-                      if (!selectedFacebookPostId && facebookPostOptions.posts[0]) {
-                        handleFacebookPostSelect(facebookPostOptions.posts[0].postId);
+                      if (!selectedFacebookPostId && selectedFacebookPage?.posts[0]) {
+                        handleFacebookPostSelect(selectedFacebookPage.posts[0].postId);
                       }
                     }}
                     type="button"
                   >
                     Choose from recent connected Page posts instead
                   </button>
+                ) : null}
+                {selectedFacebookPage && selectedFacebookPage.posts.length === 0 ? (
+                  <p className="text-sm leading-6 text-slate-700">
+                    No published posts were returned for this Page.
+                  </p>
                 ) : null}
               </div>
             )}

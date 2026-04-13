@@ -278,6 +278,10 @@ const adminTaskWriteFields = {
 };
 
 export const adminTaskCreateBodySchema = z.object(adminTaskWriteFields);
+export const adminTaskCreateBodyWithFacebookSourceSchema =
+  adminTaskCreateBodySchema.extend({
+    facebookSourcePageId: z.string().trim().min(1).optional(),
+  });
 
 export const adminTaskUpdateBodySchema = z
   .object({
@@ -291,6 +295,7 @@ export const adminTaskUpdateBodySchema = z
     requiresVerification: adminTaskWriteFields.requiresVerification.optional(),
     verificationType: adminTaskWriteFields.verificationType.optional(),
     configJson: adminTaskWriteFields.configJson,
+    facebookSourcePageId: z.string().trim().min(1).optional(),
   })
   .refine((body) => Object.keys(body).length > 0, {
     message: "At least one task field is required.",
@@ -346,11 +351,16 @@ export const adminFacebookPostOptionSchema = z.object({
   postId: z.string(),
 });
 
-export const adminFacebookPostOptionsResponseSchema = z.object({
-  connectedPageId: z.string().nullable(),
-  connectedPageName: z.string().nullable(),
-  error: z.string().nullable(),
+export const adminFacebookSourcePageSchema = z.object({
+  pageId: z.string(),
+  pageName: z.string(),
   posts: z.array(adminFacebookPostOptionSchema),
+});
+
+export const adminFacebookPostOptionsResponseSchema = z.object({
+  error: z.string().nullable(),
+  selectedPageId: z.string().nullable(),
+  pages: z.array(adminFacebookSourcePageSchema),
 });
 
 export const adminFacebookConnectionSelectBodySchema = z.object({
