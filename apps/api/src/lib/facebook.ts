@@ -94,6 +94,46 @@ export type FacebookManagedPageDiscoveryWarning = {
   stage: "business_client_pages" | "business_owned_pages" | "user_businesses";
 };
 
+export type FacebookManagedPageDiscoveryLog = {
+  businessId: string | null;
+  businessName: string | null;
+  count: number | null;
+  endpoint:
+    | "/me/accounts"
+    | "/me/businesses"
+    | "/{business-id}/owned_pages"
+    | "/{business-id}/client_pages"
+    | "/{page-id}";
+  error: string | null;
+  pageId: string | null;
+  pageName: string | null;
+};
+
+type FacebookManagedPageDiscoveryTrace = {
+  businessId?: string | null;
+  businessName?: string | null;
+  count?: number | null;
+  endpoint:
+    | "/me/accounts"
+    | "/me/businesses"
+    | "/{business-id}/owned_pages"
+    | "/{business-id}/client_pages"
+    | "/{page-id}";
+  error?: string | null;
+  event:
+    | "discovery_complete"
+    | "endpoint_error"
+    | "endpoint_result"
+    | "page_token_lookup_error"
+    | "page_token_lookup_result";
+  pageId?: string | null;
+  pageName?: string | null;
+};
+
+type FacebookManagedPageDiscoveryLogger = (
+  trace: FacebookManagedPageDiscoveryTrace,
+) => void;
+
 function buildGraphUrl(path: string, params?: Record<string, string>) {
   const url = new URL(`https://graph.facebook.com/${facebookApiVersion}${path}`);
 
@@ -203,7 +243,10 @@ export async function exchangeFacebookCodeForUserAccessToken(args: {
   return response.access_token;
 }
 
-export async function fetchFacebookManagedPages(userAccessToken: string) {
+export async function fetchFacebookManagedPages(
+  userAccessToken: string,
+  logger?: FacebookManagedPageDiscoveryLogger,
+) {
   const response = await facebookGraphRequest<{
     data?: FacebookManagedPage[];
   }>("/me/accounts", userAccessToken, {
@@ -215,6 +258,7 @@ export async function fetchFacebookManagedPages(userAccessToken: string) {
   const rawDebugPages: FacebookManagedPageDebug[] = [];
   const usablePages: FacebookPageConnectionOption[] = [];
   const droppedPages: FacebookManagedPageDrop[] = [];
+  const discoveryLogs: FacebookManagedPageDiscoveryLog[] = [];
   const discoveryWarnings: FacebookManagedPageDiscoveryWarning[] = [];
   const byPageId = new Map<
     string,
@@ -296,6 +340,21 @@ export async function fetchFacebookManagedPages(userAccessToken: string) {
     });
   }
 
+  discoveryLogs.push({
+    businessId: null,
+    businessName: null,
+    count: rawPages.length,
+    endpoint: "/me/accounts",
+    error: null,
+    pageId: null,
+    pageName: null,
+  });
+  logger?.({
+    count: rawPages.length,
+    endpoint: "/me/accounts",
+    event: "endpoint_result",
+  });
+
   try {
     const businessesResponse = await facebookGraphRequest<{
       data?: FacebookBusiness[];
@@ -304,6 +363,31 @@ export async function fetchFacebookManagedPages(userAccessToken: string) {
       limit: "100",
     });
     const businesses = businessesResponse?.data ?? [];
+
+    discoveryLogs.push({
+      businessId: null,
+      businessName: null,
+      count: businesses.length,
+      endpoint: "/me/businesses",
+      error: null,
+      pageId: null,
+      pageName: null,
+    });
+    logger?.({
+      count: businesses.length,
+      endpoint: "/me/businesses",
+      event: "endpoint_result",
+    });
+
+    if (businesses.length === 0) {
+      discoveryWarnings.push({
+        businessId: null,
+        businessName: null,
+        message:
+          "Meta returned zero businesses from /me/businesses for this user access token.",
+        stage: "user_businesses",
+      });
+    }
 
     for (const business of businesses) {
       if (!business.id) {
@@ -344,8 +428,32 @@ export async function fetchFacebookManagedPages(userAccessToken: string) {
             fields: edge.fields,
             limit: "100",
           });
+          const pages = pagesResponse?.data ?? [];
 
-          for (const page of pagesResponse?.data ?? []) {
+          discoveryLogs.push({
+            businessId: businessSummary.businessId,
+            businessName: businessSummary.businessName,
+            count: pages.length,
+            endpoint:
+              edge.source === "business_owned_pages"
+                ? "/{business-id}/owned_pages"
+                : "/{business-id}/client_pages",
+            error: null,
+            pageId: null,
+            pageName: null,
+          });
+          logger?.({
+            businessId: businessSummary.businessId,
+            businessName: businessSummary.businessName,
+            count: pages.length,
+            endpoint:
+              edge.source === "business_owned_pages"
+                ? "/{business-id}/owned_pages"
+                : "/{business-id}/client_pages",
+            event: "endpoint_result",
+          });
+
+          for (const page of pages) {
             if (!page.id) {
               droppedPages.push({
                 pageId: null,
@@ -364,26 +472,66 @@ export async function fetchFacebookManagedPages(userAccessToken: string) {
             });
           }
         } catch (error) {
+          const message =
+            error instanceof Error
+              ? error.message
+              : "Facebook business page discovery failed.";
+
+          discoveryLogs.push({
+            businessId: businessSummary.businessId,
+            businessName: businessSummary.businessName,
+            count: null,
+            endpoint:
+              edge.source === "business_owned_pages"
+                ? "/{business-id}/owned_pages"
+                : "/{business-id}/client_pages",
+            error: message,
+            pageId: null,
+            pageName: null,
+          });
+          logger?.({
+            businessId: businessSummary.businessId,
+            businessName: businessSummary.businessName,
+            endpoint:
+              edge.source === "business_owned_pages"
+                ? "/{business-id}/owned_pages"
+                : "/{business-id}/client_pages",
+            error: message,
+            event: "endpoint_error",
+          });
           discoveryWarnings.push({
             businessId: businessSummary.businessId,
             businessName: businessSummary.businessName,
-            message:
-              error instanceof Error
-                ? error.message
-                : "Facebook business page discovery failed.",
+            message,
             stage: edge.stage,
           });
         }
       }
     }
   } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Facebook business discovery failed.";
+
+    discoveryLogs.push({
+      businessId: null,
+      businessName: null,
+      count: null,
+      endpoint: "/me/businesses",
+      error: message,
+      pageId: null,
+      pageName: null,
+    });
+    logger?.({
+      endpoint: "/me/businesses",
+      error: message,
+      event: "endpoint_error",
+    });
     discoveryWarnings.push({
       businessId: null,
       businessName: null,
-      message:
-        error instanceof Error
-          ? error.message
-          : "Facebook business discovery failed.",
+      message,
       stage: "user_businesses",
     });
   }
@@ -407,6 +555,25 @@ export async function fetchFacebookManagedPages(userAccessToken: string) {
           },
         );
 
+        discoveryLogs.push({
+          businessId: candidate.businesses[0]?.businessId ?? null,
+          businessName: candidate.businesses[0]?.businessName ?? null,
+          count: page ? 1 : 0,
+          endpoint: "/{page-id}",
+          error: null,
+          pageId: candidate.pageId,
+          pageName: page?.name ?? candidate.pageName ?? null,
+        });
+        logger?.({
+          businessId: candidate.businesses[0]?.businessId ?? null,
+          businessName: candidate.businesses[0]?.businessName ?? null,
+          count: page ? 1 : 0,
+          endpoint: "/{page-id}",
+          event: "page_token_lookup_result",
+          pageId: candidate.pageId,
+          pageName: page?.name ?? candidate.pageName ?? null,
+        });
+
         if (page?.name) {
           candidate.pageName = page.name;
         }
@@ -419,10 +586,31 @@ export async function fetchFacebookManagedPages(userAccessToken: string) {
           candidate.tasks.add(task);
         }
       } catch (error) {
-        candidate.tokenLookupError =
+        const message =
           error instanceof Error
             ? error.message
             : "Facebook Page token lookup failed.";
+
+        discoveryLogs.push({
+          businessId: candidate.businesses[0]?.businessId ?? null,
+          businessName: candidate.businesses[0]?.businessName ?? null,
+          count: null,
+          endpoint: "/{page-id}",
+          error: message,
+          pageId: candidate.pageId,
+          pageName: candidate.pageName ?? null,
+        });
+        logger?.({
+          businessId: candidate.businesses[0]?.businessId ?? null,
+          businessName: candidate.businesses[0]?.businessName ?? null,
+          endpoint: "/{page-id}",
+          error: message,
+          event: "page_token_lookup_error",
+          pageId: candidate.pageId,
+          pageName: candidate.pageName ?? null,
+        });
+        candidate.tokenLookupError =
+          message;
       }
     }),
   );
@@ -469,7 +657,14 @@ export async function fetchFacebookManagedPages(userAccessToken: string) {
     });
   }
 
+  logger?.({
+    count: usablePages.length,
+    endpoint: "/me/accounts",
+    event: "discovery_complete",
+  });
+
   return {
+    discoveryLogs,
     discoveryWarnings,
     droppedPages,
     rawPages: rawDebugPages,

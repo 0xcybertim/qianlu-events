@@ -347,6 +347,23 @@ export const adminFacebookConnectionDebugSchema = z.object({
   createdAt: z.string(),
   consumedAt: z.string().nullable(),
   expiresAt: z.string(),
+  discoveryLogs: z.array(
+    z.object({
+      businessId: z.string().nullable(),
+      businessName: z.string().nullable(),
+      count: z.number().int().nonnegative().nullable(),
+      endpoint: z.enum([
+        "/me/accounts",
+        "/me/businesses",
+        "/{business-id}/owned_pages",
+        "/{business-id}/client_pages",
+        "/{page-id}",
+      ]),
+      error: z.string().nullable(),
+      pageId: z.string().nullable(),
+      pageName: z.string().nullable(),
+    }),
+  ),
   discoveryWarnings: z.array(
     z.object({
       businessId: z.string().nullable(),

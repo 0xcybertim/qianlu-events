@@ -87,6 +87,20 @@ function FacebookOnboardingCard({
   latestFacebookDebug?: {
     consumedAt: string | null;
     createdAt: string;
+    discoveryLogs: {
+      businessId: string | null;
+      businessName: string | null;
+      count: number | null;
+      endpoint:
+        | "/me/accounts"
+        | "/me/businesses"
+        | "/{business-id}/owned_pages"
+        | "/{business-id}/client_pages"
+        | "/{page-id}";
+      error: string | null;
+      pageId: string | null;
+      pageName: string | null;
+    }[];
     discoveryWarnings: {
       businessId: string | null;
       businessName: string | null;
@@ -330,6 +344,33 @@ function FacebookOnboardingCard({
             </p>
             <p>Returned Pages: {latestFacebookDebug.pages.length}</p>
             <p>Discovered assets across user and business endpoints: {latestFacebookDebug.rawPages.length}</p>
+            {latestFacebookDebug.discoveryLogs.length > 0 ? (
+              <div className="space-y-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                  Endpoint logs
+                </p>
+                <ul className="space-y-2">
+                  {latestFacebookDebug.discoveryLogs.map((entry, index) => (
+                    <li key={`${entry.endpoint}-${entry.businessId ?? "root"}-${entry.pageId ?? "none"}-${index}`} className="font-mono text-xs leading-6 text-slate-900">
+                      <div>
+                        {entry.endpoint} | count: {entry.count ?? "n/a"}
+                        {entry.error ? ` | error: ${entry.error}` : ""}
+                      </div>
+                      {entry.businessName || entry.businessId ? (
+                        <div className="text-slate-600">
+                          business: {entry.businessName ?? "Unnamed business"} ({entry.businessId ?? "no-id"})
+                        </div>
+                      ) : null}
+                      {entry.pageName || entry.pageId ? (
+                        <div className="text-slate-600">
+                          page: {entry.pageName ?? "Unnamed"} ({entry.pageId ?? "no-id"})
+                        </div>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
             {latestFacebookDebug.pages.length > 0 ? (
               <ul className="space-y-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] px-4 py-3">
                 {latestFacebookDebug.pages.map((page) => (

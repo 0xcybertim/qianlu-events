@@ -568,7 +568,24 @@ const facebookOauthDiscoveryWarningSchema = z.object({
   ]),
 });
 
+const facebookOauthDiscoveryLogSchema = z.object({
+  businessId: z.string().nullable(),
+  businessName: z.string().nullable(),
+  count: z.number().int().nonnegative().nullable(),
+  endpoint: z.enum([
+    "/me/accounts",
+    "/me/businesses",
+    "/{business-id}/owned_pages",
+    "/{business-id}/client_pages",
+    "/{page-id}",
+  ]),
+  error: z.string().nullable(),
+  pageId: z.string().nullable(),
+  pageName: z.string().nullable(),
+});
+
 const facebookOauthStoredDebugSchema = z.object({
+  discoveryLogs: z.array(facebookOauthDiscoveryLogSchema).default([]),
   discoveryWarnings: z.array(facebookOauthDiscoveryWarningSchema).default([]),
   usablePages: z.array(facebookPendingPageOptionSchema).default([]),
   rawPages: z.array(facebookOauthStoredPageSchema).default([]),
@@ -621,6 +638,7 @@ function parseFacebookOauthStoredDebug(value: Prisma.JsonValue | null) {
   }
 
   return {
+    discoveryLogs: [],
     discoveryWarnings: [],
     droppedPages: [],
     rawPages: [],
@@ -670,6 +688,7 @@ function serializeFacebookOauthDebugState(
     createdAt: state.createdAt.toISOString(),
     consumedAt: state.consumedAt?.toISOString() ?? null,
     expiresAt: state.expiresAt.toISOString(),
+    discoveryLogs: parseFacebookOauthStoredDebug(state.pageOptionsJson).discoveryLogs,
     discoveryWarnings: parseFacebookOauthStoredDebug(state.pageOptionsJson).discoveryWarnings,
     pages: parseFacebookOauthStoredDebug(state.pageOptionsJson).usablePages.map((page) => ({
       pageId: page.pageId,
@@ -1311,6 +1330,14 @@ export function registerAdminRoutes(app: FastifyInstance) {
     };
   }>("/admin/integrations/facebook/callback", async (request, reply) => {
     const stateValue = request.query.state;
+    request.log.info(
+      {
+        hasCode: Boolean(request.query.code),
+        hasError: Boolean(request.query.error),
+        state: stateValue ?? null,
+      },
+      "Facebook OAuth callback received.",
+    );
     const oauthState = stateValue
       ? await prisma.adminFacebookOAuthState.findUnique({
           where: {
@@ -1331,10 +1358,26 @@ export function registerAdminRoutes(app: FastifyInstance) {
       oauthState.consumedAt ||
       oauthState.expiresAt <= new Date()
     ) {
+      request.log.warn(
+        {
+          eventId: oauthState?.eventId ?? null,
+          state: stateValue ?? null,
+        },
+        "Facebook OAuth callback state was invalid, consumed, or expired.",
+      );
       return reply.redirect(fallbackUrl);
     }
 
     if (request.query.error || !request.query.code) {
+      request.log.warn(
+        {
+          error: request.query.error ?? null,
+          errorDescription: request.query.error_description ?? null,
+          eventId: oauthState.eventId,
+          state: stateValue ?? null,
+        },
+        "Facebook OAuth callback denied or missing code.",
+      );
       await prisma.adminFacebookOAuthState.update({
         where: {
           id: oauthState.id,
@@ -1354,13 +1397,56 @@ export function registerAdminRoutes(app: FastifyInstance) {
         code: request.query.code,
         redirectUri: getFacebookOAuthRedirectUri(),
       });
-      const { droppedPages, rawPages, usablePages } =
-        await fetchFacebookManagedPages(userAccessToken);
+      const {
+        discoveryLogs,
+        discoveryWarnings,
+        droppedPages,
+        rawPages,
+        usablePages,
+      } =
+        await fetchFacebookManagedPages(userAccessToken, (trace) => {
+          const level =
+            trace.event === "endpoint_error" ||
+            trace.event === "page_token_lookup_error"
+              ? "warn"
+              : "info";
+
+          request.log[level](
+            {
+              businessId: trace.businessId ?? null,
+              businessName: trace.businessName ?? null,
+              count: trace.count ?? null,
+              endpoint: trace.endpoint,
+              error: trace.error ?? null,
+              event: trace.event,
+              eventId: oauthState.eventId,
+              pageId: trace.pageId ?? null,
+              pageName: trace.pageName ?? null,
+              state: stateValue ?? null,
+            },
+            "Facebook discovery trace.",
+          );
+        });
       const debugPayload = {
+        discoveryLogs,
+        discoveryWarnings,
         droppedPages,
         rawPages,
         usablePages,
       } satisfies Prisma.InputJsonValue;
+
+      request.log.info(
+        {
+          discoveryLogCount: discoveryLogs.length,
+          discoveryWarningCount: discoveryWarnings.length,
+          droppedPageCount: droppedPages.length,
+          eventId: oauthState.eventId,
+          rawPageCount: rawPages.length,
+          state: stateValue ?? null,
+          usablePageCount: usablePages.length,
+        },
+        "Facebook OAuth discovery completed.",
+      );
 
       if (usablePages.length === 0) {
         await prisma.adminFacebookOAuthState.update({
