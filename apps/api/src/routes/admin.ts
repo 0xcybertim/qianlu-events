@@ -652,6 +652,63 @@ async function serializeAdminEventSummary(access: {
   };
 }
 
+async function findTaskWithDuplicateCommentPrefix(args: {
+  eventId: string;
+  excludeTaskId?: string;
+  taskConfig: Prisma.JsonValue | null;
+  taskPlatform: string;
+  taskType: string;
+}) {
+  const candidateConfig = getFacebookCommentTaskConfig({
+    configJson: args.taskConfig,
+    platform: args.taskPlatform,
+    type: args.taskType,
+  });
+
+  if (!candidateConfig) {
+    return null;
+  }
+
+  const tasks = await prisma.task.findMany({
+    where: {
+      eventId: args.eventId,
+      ...(args.excludeTaskId
+        ? {
+            id: {
+              not: args.excludeTaskId,
+            },
+          }
+        : {}),
+    },
+    select: {
+      configJson: true,
+      id: true,
+      platform: true,
+      title: true,
+      type: true,
+    },
+  });
+
+  const normalizedCandidatePrefix = normalizeCommentText(
+    candidateConfig.requiredPrefix,
+  );
+
+  return (
+    tasks.find((task) => {
+      const taskConfig = getFacebookCommentTaskConfig(task);
+
+      if (!taskConfig) {
+        return false;
+      }
+
+      return (
+        normalizeCommentText(taskConfig.requiredPrefix) ===
+        normalizedCandidatePrefix
+      );
+    }) ?? null
+  );
+}
+
 async function serializeAdminEventDetail(event: AdminEventWithTasks | null) {
   if (!event) {
     return null;
@@ -2114,6 +2171,22 @@ export function registerAdminRoutes(app: FastifyInstance) {
 
       const body = adminTaskCreateBodyWithFacebookSourceSchema.parse(request.body);
 
+      const duplicateCommentPrefix = await findTaskWithDuplicateCommentPrefix({
+        eventId: access.event.id,
+        taskConfig: body.configJson ?? null,
+        taskPlatform: body.platform,
+        taskType: body.type,
+      });
+
+      if (duplicateCommentPrefix) {
+        reply.code(409);
+
+        return {
+          message:
+            `Required prefix is already used by "${duplicateCommentPrefix.title}". Use a unique prefix for each social comment task.`,
+        };
+      }
+
       if (body.type === "SOCIAL_COMMENT" && body.platform === "FACEBOOK") {
         await syncEventFacebookConnectionFromSelection({
           eventId: access.event.id,
@@ -2177,9 +2250,29 @@ export function registerAdminRoutes(app: FastifyInstance) {
 
       const body = adminTaskUpdateBodySchema.parse(request.body);
 
+      const mergedType = body.type ?? task.type;
+      const mergedPlatform = body.platform ?? task.platform;
+      const mergedConfigJson = body.configJson ?? task.configJson ?? null;
+      const duplicateCommentPrefix = await findTaskWithDuplicateCommentPrefix({
+        eventId: access.event.id,
+        excludeTaskId: task.id,
+        taskConfig: mergedConfigJson,
+        taskPlatform: mergedPlatform,
+        taskType: mergedType,
+      });
+
+      if (duplicateCommentPrefix) {
+        reply.code(409);
+
+        return {
+          message:
+            `Required prefix is already used by "${duplicateCommentPrefix.title}". Use a unique prefix for each social comment task.`,
+        };
+      }
+
       if (
-        (body.type ?? task.type) === "SOCIAL_COMMENT" &&
-        (body.platform ?? task.platform) === "FACEBOOK"
+        mergedType === "SOCIAL_COMMENT" &&
+        mergedPlatform === "FACEBOOK"
       ) {
         await syncEventFacebookConnectionFromSelection({
           eventId: access.event.id,

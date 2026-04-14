@@ -1,6 +1,6 @@
 import { Button, StatusBadge } from "@qianlu-events/ui";
 import { Form, redirect, useNavigation } from "react-router";
-import { useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 
 import type { Route } from "./+types/admin-event-tasks";
 import {
@@ -276,6 +276,80 @@ function formatEnumLabel(value: string) {
     .join(" ");
 }
 
+function formatTaskPointsLabel(points: number) {
+  return `${points} ${points === 1 ? "pt" : "pts"}`;
+}
+
+function normalizeTaskFilter(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function taskMatchesFilter(
+  task: {
+    title: string;
+    type: string;
+    platform: string;
+    description: string;
+  },
+  filterValue: string,
+) {
+  if (!filterValue) {
+    return true;
+  }
+
+  const haystack = [
+    task.title,
+    formatEnumLabel(task.type),
+    formatEnumLabel(task.platform),
+    task.description,
+  ]
+    .join(" ")
+    .toLowerCase();
+
+  return haystack.includes(filterValue);
+}
+
+function buildCommentPrefixBase(value: string) {
+  const normalized = value
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .join("_")
+    .slice(0, 18);
+
+  return normalized || "COMMENT";
+}
+
+function normalizeCommentPrefixValue(value: string) {
+  return value.trim().replace(/\s+/g, " ").toUpperCase();
+}
+
+function buildUniqueCommentPrefix(args: {
+  existingPrefixes: string[];
+  fallback?: string;
+  title: string;
+}) {
+  const used = new Set(
+    args.existingPrefixes.map((prefix) => normalizeCommentPrefixValue(prefix)),
+  );
+  const base = buildCommentPrefixBase(args.title || args.fallback || "COMMENT");
+
+  if (!used.has(base)) {
+    return base;
+  }
+
+  for (let index = 2; index < 1000; index += 1) {
+    const candidate = `${base}_${index}`;
+
+    if (!used.has(candidate)) {
+      return candidate;
+    }
+  }
+
+  return `${base}_${Date.now().toString().slice(-4)}`;
+}
+
 function getApiBaseUrl() {
   return (
     import.meta.env.VITE_API_BASE_URL ??
@@ -303,6 +377,7 @@ function FacebookOnboardingCard({
   eventSlug,
   latestFacebookDebug,
   pendingConnection,
+  showOauthDebugPanel,
 }: {
   connectStatus?: string | null;
   connection?: {
@@ -381,6 +456,7 @@ function FacebookOnboardingCard({
       pageName: string;
     }[];
   } | null;
+  showOauthDebugPanel: boolean;
 }) {
   const [showDebugDetails, setShowDebugDetails] = useState(false);
   const apiBaseUrl = getApiBaseUrl();
@@ -400,107 +476,27 @@ function FacebookOnboardingCard({
               : null;
 
   return (
-    <AdminCard>
-      <h2 className="font-display text-xl font-semibold">
-        Facebook Comment Setup
-      </h2>
-      <p className="mt-2 text-sm leading-6 text-slate-700">
-        Use this checklist before creating a `SOCIAL_COMMENT` Facebook task.
-        The webhook must be reachable over public HTTPS, and app secrets stay
-        server-side.
-      </p>
+    <div className="space-y-0 px-1 py-1">
       {connectMessage ? (
-        <p className="mt-4 rounded-2xl bg-white/70 px-4 py-3 text-sm leading-6 text-slate-700">
+        <p className="rounded-2xl bg-white/70 px-4 py-3 text-sm leading-6 text-slate-700">
           {connectMessage}
         </p>
       ) : null}
 
-      <div className="mt-4 grid gap-4 lg:grid-cols-2">
-        <div className="rounded-2xl bg-white/70 p-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-            1. Server env vars
-          </p>
-          <div className="mt-3 rounded-xl bg-slate-950 px-4 py-3 font-mono text-xs leading-6 text-white">
-            <div>FACEBOOK_APP_ID=...</div>
-            <div>FACEBOOK_LOGIN_CONFIGURATION_ID=...</div>
-            <div>FACEBOOK_APP_SECRET=...</div>
-            <div>FACEBOOK_VERIFY_TOKEN=...</div>
-          </div>
-          <p className="mt-3 text-sm leading-6 text-slate-700">
-            These are platform-level Meta app values for the whole backend.
-            Put them in the API environment or deployment secrets. Do not put
-            them in the browser or the web app env file.
-          </p>
-        </div>
-
-        <div className="rounded-2xl bg-white/70 p-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-            2. Meta webhook values
-          </p>
-          <div className="mt-3 space-y-3">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                Callback URL
-              </p>
-              <div className="mt-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] px-4 py-3 font-mono text-xs leading-6 text-slate-900">
-                {callbackUrl}
-              </div>
-            </div>
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                Verify token
-              </p>
-              <div className="mt-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] px-4 py-3 font-mono text-xs leading-6 text-slate-900">
-                Use the same value as <code>FACEBOOK_VERIFY_TOKEN</code>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
       <div className="mt-4 rounded-2xl bg-white/70 p-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-              Connected Page
-            </p>
-            <p className="mt-2 text-sm leading-6 text-slate-700">
-              {connection
-                ? `${connection.pageName ?? "Unnamed Page"} (${connection.pageId})`
-                : "No Facebook Page has been connected for this event yet."}
-            </p>
-            {connection ? (
-              <p className="text-sm leading-6 text-slate-700">
-                Stored access token: {connection.hasAccessToken ? `...${connection.tokenHint ?? "set"}` : "missing"}
-              </p>
-            ) : null}
-          </div>
-          {connection ? (
-            <StatusBadge
-              label={connection.hasAccessToken ? "CONNECTED" : "TOKEN MISSING"}
-              tone={connection.hasAccessToken ? "verified" : "warning"}
-            />
-          ) : (
-            <StatusBadge label="NOT CONNECTED" tone="neutral" />
-          )}
-        </div>
-        {connection ? (
-          <p className="mt-3 text-xs uppercase tracking-[0.14em] text-slate-500">
-            Last updated {new Intl.DateTimeFormat("en", {
-              dateStyle: "medium",
-              timeStyle: "short",
-            }).format(new Date(connection.updatedAt))}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm font-medium tracking-[-0.03em] text-slate-900">
+            {connection
+              ? `Connected to page ${connection.pageName ?? "Unnamed Page"}`
+              : "No Facebook Page connected"}
           </p>
-        ) : null}
-      </div>
-
-      <div className="mt-4 flex flex-wrap gap-3">
-        <a
-          className="inline-flex min-h-11 items-center justify-center rounded-full bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-slate-800"
-          href={facebookOauthStartUrl}
-        >
-          {connection ? "Reconnect Facebook Page" : "Connect Facebook Page"}
-        </a>
+          <a
+            className="inline-flex min-h-11 items-center justify-center rounded-full border border-[var(--color-border)] bg-white px-4 py-2 text-sm font-semibold text-slate-900 transition-colors hover:bg-slate-50"
+            href={facebookOauthStartUrl}
+          >
+            {connection ? "Reconnect" : "Connect"}
+          </a>
+        </div>
       </div>
 
       {pendingConnection && pendingConnection.pages.length > 0 ? (
@@ -526,103 +522,120 @@ function FacebookOnboardingCard({
         </Form>
       ) : null}
 
-      <div className="mt-4 rounded-2xl bg-white/70 p-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-              Facebook OAuth debug
-            </p>
-            <p className="mt-2 text-sm leading-6 text-slate-700">
-              Inspect the latest Meta OAuth result stored for this event.
-            </p>
+      {showOauthDebugPanel ? (
+        <div className="mt-4 rounded-2xl bg-white/70 p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                Facebook OAuth debug
+              </p>
+              <p className="mt-2 text-sm leading-6 text-slate-700">
+                Inspect the latest Meta OAuth result stored for this event.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              {latestFacebookDebug ? (
+                <StatusBadge
+                  label={
+                    latestFacebookDebug.consumedAt ? "CONSUMED" : "PENDING"
+                  }
+                  tone={latestFacebookDebug.consumedAt ? "neutral" : "warning"}
+                />
+              ) : (
+                <StatusBadge label="NO DEBUG DATA" tone="neutral" />
+              )}
+              <button
+                className="inline-flex min-h-11 items-center justify-center rounded-full border border-[var(--color-border)] bg-white px-4 py-2 text-sm font-semibold text-slate-900 transition-colors hover:bg-slate-50"
+                onClick={() => setShowDebugDetails((value) => !value)}
+                type="button"
+              >
+                {showDebugDetails
+                  ? "Hide technical debug"
+                  : "Show technical debug"}
+              </button>
+            </div>
           </div>
-          <div className="flex flex-wrap items-center gap-3">
-            {latestFacebookDebug ? (
-              <StatusBadge
-                label={latestFacebookDebug.consumedAt ? "CONSUMED" : "PENDING"}
-                tone={latestFacebookDebug.consumedAt ? "neutral" : "warning"}
-              />
-            ) : (
-              <StatusBadge label="NO DEBUG DATA" tone="neutral" />
-            )}
-            <button
-              className="inline-flex min-h-11 items-center justify-center rounded-full border border-[var(--color-border)] bg-white px-4 py-2 text-sm font-semibold text-slate-900 transition-colors hover:bg-slate-50"
-              onClick={() => setShowDebugDetails((value) => !value)}
-              type="button"
-            >
-              {showDebugDetails ? "Hide technical debug" : "Show technical debug"}
-            </button>
-          </div>
-        </div>
-        {latestFacebookDebug && showDebugDetails ? (
-          <div className="mt-4 space-y-3 text-sm leading-6 text-slate-700">
-            <p>
-              Last OAuth attempt{" "}
-              {new Intl.DateTimeFormat("en", {
-                dateStyle: "medium",
-                timeStyle: "short",
-              }).format(new Date(latestFacebookDebug.createdAt))}
-              {latestFacebookDebug.consumedAt
-                ? `, consumed ${new Intl.DateTimeFormat("en", {
-                    dateStyle: "medium",
-                    timeStyle: "short",
-                  }).format(new Date(latestFacebookDebug.consumedAt))}`
-                : ""}
-              .
-            </p>
-            <p>
-              Stored state: <code>{latestFacebookDebug.state}</code>
-            </p>
-            <p>
-              Selection expires{" "}
-              {new Intl.DateTimeFormat("en", {
-                dateStyle: "medium",
-                timeStyle: "short",
-              }).format(new Date(latestFacebookDebug.expiresAt))}
-              .
-            </p>
-            <p>Returned Pages: {latestFacebookDebug.pages.length}</p>
-            <p>Discovered assets across user and business endpoints: {latestFacebookDebug.rawPages.length}</p>
-            {latestFacebookDebug.discoveryLogs.length > 0 ? (
-              <div className="space-y-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] px-4 py-3">
-                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                  Endpoint logs
-                </p>
-                <ul className="space-y-2">
-                  {latestFacebookDebug.discoveryLogs.map((entry, index) => (
-                    <li key={`${entry.endpoint}-${entry.businessId ?? "root"}-${entry.pageId ?? "none"}-${index}`} className="font-mono text-xs leading-6 text-slate-900">
-                      <div>
-                        {entry.endpoint} | count: {entry.count ?? "n/a"}
-                        {entry.error ? ` | error: ${entry.error}` : ""}
-                      </div>
-                      {entry.businessName || entry.businessId ? (
-                        <div className="text-slate-600">
-                          business: {entry.businessName ?? "Unnamed business"} ({entry.businessId ?? "no-id"})
+          {latestFacebookDebug && showDebugDetails ? (
+            <div className="mt-4 space-y-3 text-sm leading-6 text-slate-700">
+              <p>
+                Last OAuth attempt{" "}
+                {new Intl.DateTimeFormat("en", {
+                  dateStyle: "medium",
+                  timeStyle: "short",
+                }).format(new Date(latestFacebookDebug.createdAt))}
+                {latestFacebookDebug.consumedAt
+                  ? `, consumed ${new Intl.DateTimeFormat("en", {
+                      dateStyle: "medium",
+                      timeStyle: "short",
+                    }).format(new Date(latestFacebookDebug.consumedAt))}`
+                  : ""}
+                .
+              </p>
+              <p>
+                Stored state: <code>{latestFacebookDebug.state}</code>
+              </p>
+              <p>
+                Selection expires{" "}
+                {new Intl.DateTimeFormat("en", {
+                  dateStyle: "medium",
+                  timeStyle: "short",
+                }).format(new Date(latestFacebookDebug.expiresAt))}
+                .
+              </p>
+              <p>Returned Pages: {latestFacebookDebug.pages.length}</p>
+              <p>
+                Discovered assets across user and business endpoints:{" "}
+                {latestFacebookDebug.rawPages.length}
+              </p>
+              {latestFacebookDebug.discoveryLogs.length > 0 ? (
+                <div className="space-y-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] px-4 py-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                    Endpoint logs
+                  </p>
+                  <ul className="space-y-2">
+                    {latestFacebookDebug.discoveryLogs.map((entry, index) => (
+                      <li
+                        className="font-mono text-xs leading-6 text-slate-900"
+                        key={`${entry.endpoint}-${entry.businessId ?? "root"}-${entry.pageId ?? "none"}-${index}`}
+                      >
+                        <div>
+                          {entry.endpoint} | count: {entry.count ?? "n/a"}
+                          {entry.error ? ` | error: ${entry.error}` : ""}
                         </div>
-                      ) : null}
-                      {entry.pageName || entry.pageId ? (
-                        <div className="text-slate-600">
-                          page: {entry.pageName ?? "Unnamed"} ({entry.pageId ?? "no-id"})
-                        </div>
-                      ) : null}
+                        {entry.businessName || entry.businessId ? (
+                          <div className="text-slate-600">
+                            business:{" "}
+                            {entry.businessName ?? "Unnamed business"} (
+                            {entry.businessId ?? "no-id"})
+                          </div>
+                        ) : null}
+                        {entry.pageName || entry.pageId ? (
+                          <div className="text-slate-600">
+                            page: {entry.pageName ?? "Unnamed"} (
+                            {entry.pageId ?? "no-id"})
+                          </div>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+              {latestFacebookDebug.pages.length > 0 ? (
+                <ul className="space-y-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] px-4 py-3">
+                  {latestFacebookDebug.pages.map((page) => (
+                    <li
+                      className="font-mono text-xs leading-6 text-slate-900"
+                      key={page.pageId}
+                    >
+                      {page.pageName} ({page.pageId})
                     </li>
                   ))}
                 </ul>
-              </div>
-            ) : null}
-            {latestFacebookDebug.pages.length > 0 ? (
-              <ul className="space-y-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] px-4 py-3">
-                {latestFacebookDebug.pages.map((page) => (
-                  <li key={page.pageId} className="font-mono text-xs leading-6 text-slate-900">
-                    {page.pageName} ({page.pageId})
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] px-4 py-3 text-xs uppercase tracking-[0.14em] text-slate-500">
-                Meta returned no manageable Pages for the last OAuth attempt.
-              </p>
-            )}
+              ) : (
+                <p className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] px-4 py-3 text-xs uppercase tracking-[0.14em] text-slate-500">
+                  Meta returned no manageable Pages for the last OAuth attempt.
+                </p>
+              )}
             {latestFacebookDebug.rawPages.length > 0 ? (
               <div className="space-y-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] px-4 py-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
@@ -720,57 +733,10 @@ function FacebookOnboardingCard({
             event yet. Run the connect flow once to capture what Meta returns.
           </p>
         )}
-      </div>
-
-      <div className="mt-4 rounded-2xl bg-white/70 p-4">
-        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-          3. Quick setup flow
-        </p>
-        <div className="mt-4 grid gap-4 lg:grid-cols-2">
-          <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-4">
-            <p className="text-sm font-semibold text-slate-900">Step 1. Prepare Meta</p>
-            <ol className="mt-3 space-y-3 text-sm leading-6 text-slate-700">
-              <li>1. Add `Webhooks` and `Facebook Login for Business` to the Meta app.</li>
-              <li>2. Use a `User access token` configuration with `business_management`, `pages_show_list`, `pages_read_engagement`, `pages_read_user_content`, and `pages_manage_metadata`.</li>
-              <li>3. If the Page is inside a business portfolio, the connecting person still needs Page-level tasks or role access.</li>
-              <li>4. Subscribe the app to the `Page` object and the `feed` webhook field.</li>
-            </ol>
-          </div>
-          <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-4">
-            <p className="text-sm font-semibold text-slate-900">Step 2. Connect the Page</p>
-            <ol className="mt-3 space-y-3 text-sm leading-6 text-slate-700">
-              <li>1. Use `Connect Facebook Page` above.</li>
-              <li>2. Pick the exact Page that owns the post you want to verify.</li>
-              <li>3. Confirm the page shows as connected before creating the task.</li>
-            </ol>
-          </div>
-          <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-4">
-            <p className="text-sm font-semibold text-slate-900">Step 3. Create the task</p>
-            <ol className="mt-3 space-y-3 text-sm leading-6 text-slate-700">
-              <li>1. Choose `Social Comment` in the task form below.</li>
-              <li>2. The form will lock `Facebook` and `Automatic` for you.</li>
-              <li>3. Paste the public post URL and the Graph API post ID.</li>
-              <li>4. Set the required comment prefix, for example `QIANLU`.</li>
-            </ol>
-          </div>
-          <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-4">
-            <p className="text-sm font-semibold text-slate-900">Step 4. Participant flow</p>
-            <ol className="mt-3 space-y-3 text-sm leading-6 text-slate-700">
-              <li>1. Participants open the Facebook post from the task.</li>
-              <li>2. They comment the generated text, for example `QIANLU AB12CD`.</li>
-              <li>3. They tap `I&apos;ve commented` and the system verifies the comment automatically.</li>
-            </ol>
-          </div>
         </div>
-      </div>
+      ) : null}
 
-      <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
-        If verification fails, first check that the callback URL is public,
-        the verify token matches exactly, the Page is connected to the Meta
-        app, the task post ID matches the real Facebook post, and the comment
-        text includes the participant verification code.
-      </div>
-    </AdminCard>
+    </div>
   );
 }
 
@@ -781,21 +747,32 @@ function readOptional(formData: FormData, key: string) {
 }
 
 function parseTaskForm(formData: FormData) {
+  const type = formData.get("type")?.toString() ?? "SOCIAL_FOLLOW";
+  const platform = formData.get("platform")?.toString() ?? "NONE";
+  const isFacebookCommentPreset =
+    type === "SOCIAL_COMMENT" && platform === "FACEBOOK";
+  const primaryLabel = readOptional(formData, "primaryLabel");
   const configJson = {
     primaryUrl: readOptional(formData, "primaryUrl"),
     secondaryUrl: readOptional(formData, "secondaryUrl"),
-    primaryLabel: readOptional(formData, "primaryLabel"),
+    primaryLabel: isFacebookCommentPreset
+      ? (primaryLabel ?? "Open Facebook post")
+      : primaryLabel,
     secondaryLabel: readOptional(formData, "secondaryLabel"),
     proofHint: readOptional(formData, "proofHint"),
     requiredPrefix: readOptional(formData, "requiredPrefix"),
     commentInstructions: readOptional(formData, "commentInstructions"),
     facebookPostId: readOptional(formData, "facebookPostId"),
-    requireVerificationCode: formData.get("hasRequireVerificationCode")
-      ? formData.get("requireVerificationCode") === "on"
-      : undefined,
-    autoVerify: formData.get("hasAutoVerify")
-      ? formData.get("autoVerify") === "on"
-      : undefined,
+    requireVerificationCode: isFacebookCommentPreset
+      ? true
+      : formData.get("hasRequireVerificationCode")
+        ? formData.get("requireVerificationCode") === "on"
+        : undefined,
+    autoVerify: isFacebookCommentPreset
+      ? true
+      : formData.get("hasAutoVerify")
+        ? formData.get("autoVerify") === "on"
+        : undefined,
   };
   const compactConfig = Object.fromEntries(
     Object.entries(configJson).filter(
@@ -806,8 +783,8 @@ function parseTaskForm(formData: FormData) {
   return {
     title: formData.get("title")?.toString() ?? "",
     description: formData.get("description")?.toString() ?? "",
-    type: formData.get("type")?.toString() ?? "SOCIAL_FOLLOW",
-    platform: formData.get("platform")?.toString() ?? "NONE",
+    type,
+    platform,
     points: Number(formData.get("points")?.toString() ?? 0),
     sortOrder: Number(formData.get("sortOrder")?.toString() ?? 0),
     isActive: formData.get("isActive") === "on",
@@ -884,6 +861,38 @@ export async function action({ params, request }: Route.ActionArgs) {
       };
     }
 
+    if (intent === "set-active" && taskId) {
+      await updateAdminTask(
+        params.eventSlug,
+        taskId,
+        {
+          isActive: true,
+        },
+        request,
+      );
+
+      return {
+        formKey,
+        success: "Task activated.",
+      };
+    }
+
+    if (intent === "set-inactive" && taskId) {
+      await updateAdminTask(
+        params.eventSlug,
+        taskId,
+        {
+          isActive: false,
+        },
+        request,
+      );
+
+      return {
+        formKey,
+        success: "Task set to inactive.",
+      };
+    }
+
     if (intent === "disable" && taskId) {
       await disableAdminTask(params.eventSlug, taskId, request);
 
@@ -937,12 +946,20 @@ export async function action({ params, request }: Route.ActionArgs) {
 function TaskForm({
   actionData,
   buttonLabel,
+  eventTasks,
   facebookPostOptions,
   intent,
   task,
 }: {
   actionData?: { error?: string; formKey?: string; success?: string } | null;
   buttonLabel: string;
+  eventTasks: Array<{
+    configJson?: {
+      requiredPrefix?: string;
+    } | null;
+    id: string;
+    title: string;
+  }>;
   facebookPostOptions: {
     error: string | null;
     selectedPageId: string | null;
@@ -1007,6 +1024,7 @@ function TaskForm({
     : currentGuide.allowedVerificationTypes;
   const isFacebookCommentPreset =
     selectedType === "SOCIAL_COMMENT" && selectedPlatform === "FACEBOOK";
+  const shouldSimplifySocialCommentForm = isFacebookCommentPreset;
   const availableFacebookPages = facebookPostOptions.pages;
   const initialSourcePageId =
     task?.configJson?.facebookPostId && availableFacebookPages.some((page) =>
@@ -1043,6 +1061,17 @@ function TaskForm({
       ? selectedFacebookPage?.posts.find((post) => post.postId === selectedFacebookPostId) ??
         null
       : null;
+  const existingCommentPrefixes = eventTasks
+    .filter((entry) => entry.id !== task?.id)
+    .map((entry) => entry.configJson?.requiredPrefix)
+    .filter((prefix): prefix is string => Boolean(prefix));
+  const defaultRequiredPrefix =
+    task?.configJson?.requiredPrefix ??
+    buildUniqueCommentPrefix({
+      existingPrefixes: existingCommentPrefixes,
+      fallback: "COMMENT",
+      title: task?.title ?? "Comment on our Facebook post",
+    });
   const activeFormKey = navigation.formData?.get("formKey")?.toString() ?? "";
   const isSubmittingThisForm =
     activeFormKey === formKey && navigation.state !== "idle";
@@ -1091,6 +1120,20 @@ function TaskForm({
       <input name="formKey" type="hidden" value={formKey} />
       <input name="intent" type="hidden" value={intent} />
       {task ? <input name="taskId" type="hidden" value={task.id} /> : null}
+      {shouldSimplifySocialCommentForm ? (
+        <>
+          <input
+            name="isActive"
+            type="hidden"
+            value={task?.isActive === false ? "" : "on"}
+          />
+          <input name="sortOrder" type="hidden" value={task?.sortOrder ?? 0} />
+          <input name="hasRequireVerificationCode" type="hidden" value="1" />
+          <input name="requireVerificationCode" type="hidden" value="on" />
+          <input name="hasAutoVerify" type="hidden" value="1" />
+          <input name="autoVerify" type="hidden" value="on" />
+        </>
+      ) : null}
       <div className="rounded-2xl bg-white/70 p-4">
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
           1. Choose task type
@@ -1145,78 +1188,103 @@ function TaskForm({
             />
           </AdminField>
         </div>
-        <div className="mt-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-4 text-sm leading-6 text-slate-700">
-          <p className="font-semibold text-slate-900">{formatEnumLabel(selectedType)}</p>
-          <p className="mt-2">{currentGuide.summary}</p>
-          <p className="mt-3 text-xs uppercase tracking-[0.14em] text-slate-500">
-            {currentGuide.detailHint}
-          </p>
-        </div>
+        {!shouldSimplifySocialCommentForm ? (
+          <div className="mt-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-4 text-sm leading-6 text-slate-700">
+            <p className="font-semibold text-slate-900">
+              {formatEnumLabel(selectedType)}
+            </p>
+            <p className="mt-2">{currentGuide.summary}</p>
+            <p className="mt-3 text-xs uppercase tracking-[0.14em] text-slate-500">
+              {currentGuide.detailHint}
+            </p>
+          </div>
+        ) : null}
       </div>
 
-      <div className="rounded-2xl bg-white/70 p-4">
-        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-          2. Review setup
-        </p>
-        <div className="mt-4 grid gap-3 sm:grid-cols-3">
-          <AdminField label="Verification type">
-            {currentGuide.lockVerification ? (
-              <>
-                <input
-                  name="verificationType"
-                  type="hidden"
-                  value={selectedVerificationType}
-                />
-                <input
+      {!shouldSimplifySocialCommentForm ? (
+        <div className="rounded-2xl bg-white/70 p-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+            2. Review setup
+          </p>
+          <div className="mt-4 grid gap-3 sm:grid-cols-3">
+            <AdminField label="Verification type">
+              {currentGuide.lockVerification ? (
+                <>
+                  <input
+                    name="verificationType"
+                    type="hidden"
+                    value={selectedVerificationType}
+                  />
+                  <input
+                    className={adminInputClass}
+                    disabled
+                    value={formatEnumLabel(selectedVerificationType)}
+                  />
+                </>
+              ) : (
+                <select
                   className={adminInputClass}
-                  disabled
-                  value={formatEnumLabel(selectedVerificationType)}
-                />
-              </>
-            ) : (
-              <select
-                className={adminInputClass}
-                name="verificationType"
-                onChange={(event) =>
-                  setSelectedVerificationType(event.target.value)
-                }
-                value={selectedVerificationType}
-              >
-                {availableVerificationTypes.map((type) => (
-                  <option key={type} value={type}>
-                    {formatEnumLabel(type)}
-                  </option>
-                ))}
-              </select>
-            )}
-          </AdminField>
-          <label className="flex items-center gap-3 rounded-lg bg-white px-3 py-2 text-sm">
-            <input
-              defaultChecked={task?.isActive ?? true}
-              name="isActive"
-              type="checkbox"
-            />
-            Active
-          </label>
-          <label className="flex items-center gap-3 rounded-lg bg-white px-3 py-2 text-sm">
-            {currentGuide.lockRequiresVerification ? (
+                  name="verificationType"
+                  onChange={(event) =>
+                    setSelectedVerificationType(event.target.value)
+                  }
+                  value={selectedVerificationType}
+                >
+                  {availableVerificationTypes.map((type) => (
+                    <option key={type} value={type}>
+                      {formatEnumLabel(type)}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </AdminField>
+            <label className="flex items-center gap-3 rounded-lg bg-white px-3 py-2 text-sm">
               <input
-                name="requiresVerification"
-                type="hidden"
-                value={requiresVerification ? "on" : ""}
+                defaultChecked={task?.isActive ?? true}
+                name="isActive"
+                type="checkbox"
               />
-            ) : null}
-            <input
-              checked={requiresVerification}
-              disabled={currentGuide.lockRequiresVerification}
-              name={currentGuide.lockRequiresVerification ? undefined : "requiresVerification"}
-              onChange={(event) => setRequiresVerification(event.target.checked)}
-              type="checkbox"
-            />
-            Requires verification
-          </label>
+              Active
+            </label>
+            <label className="flex items-center gap-3 rounded-lg bg-white px-3 py-2 text-sm">
+              {currentGuide.lockRequiresVerification ? (
+                <input
+                  name="requiresVerification"
+                  type="hidden"
+                  value={requiresVerification ? "on" : ""}
+                />
+              ) : null}
+              <input
+                checked={requiresVerification}
+                disabled={currentGuide.lockRequiresVerification}
+                name={
+                  currentGuide.lockRequiresVerification
+                    ? undefined
+                    : "requiresVerification"
+                }
+                onChange={(event) =>
+                  setRequiresVerification(event.target.checked)
+                }
+                type="checkbox"
+              />
+              Requires verification
+            </label>
+          </div>
         </div>
-      </div>
+      ) : (
+        <>
+          <input
+            name="requiresVerification"
+            type="hidden"
+            value={requiresVerification ? "on" : ""}
+          />
+          <input
+            name="verificationType"
+            type="hidden"
+            value={selectedVerificationType}
+          />
+        </>
+      )}
 
       <div className="rounded-2xl bg-white/70 p-4">
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
@@ -1231,14 +1299,16 @@ function TaskForm({
               required
             />
           </AdminField>
-          <AdminField label="Sort order">
-            <input
-              className={adminInputClass}
-              defaultValue={task?.sortOrder ?? 0}
-              name="sortOrder"
-              type="number"
-            />
-          </AdminField>
+          {!shouldSimplifySocialCommentForm ? (
+            <AdminField label="Sort order">
+              <input
+                className={adminInputClass}
+                defaultValue={task?.sortOrder ?? 0}
+                name="sortOrder"
+                type="number"
+              />
+            </AdminField>
+          ) : null}
         </div>
         <div className="mt-3">
           <AdminField label="Description">
@@ -1253,19 +1323,21 @@ function TaskForm({
         </div>
       </div>
 
-      <div className="rounded-2xl bg-white/70 p-4">
-        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-          4. Fill task details
-        </p>
-        <div className="mt-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-4">
-          <p className="text-sm font-semibold text-slate-900">What to set up</p>
-          <ol className="mt-3 space-y-3 text-sm leading-6 text-slate-700">
-            {currentGuide.setupSteps.map((step) => (
-              <li key={step}>{step}</li>
-            ))}
-          </ol>
+      {!shouldSimplifySocialCommentForm ? (
+        <div className="rounded-2xl bg-white/70 p-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+            4. Fill task details
+          </p>
+          <div className="mt-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-4">
+            <p className="text-sm font-semibold text-slate-900">What to set up</p>
+            <ol className="mt-3 space-y-3 text-sm leading-6 text-slate-700">
+              {currentGuide.setupSteps.map((step) => (
+                <li key={step}>{step}</li>
+              ))}
+            </ol>
+          </div>
         </div>
-      </div>
+      ) : null}
 
       <div className="grid gap-3 sm:grid-cols-2">
         {!currentGuide.showFacebookCommentFields ? (
@@ -1278,10 +1350,16 @@ function TaskForm({
             />
           </AdminField>
         ) : null}
-        <AdminField label="Primary label">
+        <AdminField
+          label={shouldSimplifySocialCommentForm ? "Button text" : "Primary label"}
+        >
           <input
             className={adminInputClass}
-            defaultValue={task?.configJson?.primaryLabel ?? ""}
+            defaultValue={
+              shouldSimplifySocialCommentForm
+                ? (task?.configJson?.primaryLabel ?? "Open Facebook post")
+                : (task?.configJson?.primaryLabel ?? "")
+            }
             name="primaryLabel"
           />
         </AdminField>
@@ -1316,24 +1394,9 @@ function TaskForm({
       ) : null}
       {currentGuide.showFacebookCommentFields ? (
         <>
-          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
-            <p className="text-sm font-semibold text-emerald-900">
-              Facebook comment task setup
-            </p>
-            <p className="mt-2 text-sm leading-6 text-emerald-900">
-              This task will watch a single Facebook post on the connected Page
-              and automatically verify comments that match your prefix plus the
-              participant code.
-            </p>
-          </div>
           <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-4">
             <p className="text-sm font-semibold text-slate-900">
               Source Page and post
-            </p>
-            <p className="mt-2 text-sm leading-6 text-slate-700">
-              Choose the Page first, then choose one of its published posts.
-              Saving the task will also sync the event&apos;s connected Page to
-              the selected source Page.
             </p>
             {facebookPostOptions.error ? (
               <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
@@ -1412,10 +1475,6 @@ function TaskForm({
               </div>
             ) : (
               <div className="mt-4 space-y-3">
-                <p className="text-sm leading-6 text-slate-700">
-                  Manual entry is a fallback. The post picker is safer because
-                  it stores the real Graph post ID from the connected Page.
-                </p>
                 {(selectedFacebookPage?.posts.length ?? 0) > 0 ? (
                   <button
                     className="text-sm font-semibold text-slate-900 underline"
@@ -1443,7 +1502,7 @@ function TaskForm({
             <AdminField label="Required prefix">
               <input
                 className={adminInputClass}
-                defaultValue={task?.configJson?.requiredPrefix ?? ""}
+                defaultValue={defaultRequiredPrefix}
                 name="requiredPrefix"
                 placeholder="QIANLU"
                 required
@@ -1472,17 +1531,9 @@ function TaskForm({
               value={facebookPrimaryUrlValue}
             />
           </AdminField>
-          <AdminField label="Comment instructions">
-            <textarea
-              className={adminInputClass}
-              defaultValue={task?.configJson?.commentInstructions ?? ""}
-              name="commentInstructions"
-              rows={3}
-            />
-          </AdminField>
         </>
       ) : null}
-      {currentGuide.showCommentAutomationOptions ? (
+      {currentGuide.showCommentAutomationOptions && !shouldSimplifySocialCommentForm ? (
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="flex items-center gap-3 rounded-lg bg-white/70 px-3 py-2 text-sm">
             <input name="hasRequireVerificationCode" type="hidden" value="1" />
@@ -1890,6 +1941,279 @@ function FacebookCommentTaskDebugPanel({
   );
 }
 
+function SidebarSectionHeader({
+  detail,
+  label,
+}: {
+  detail: string;
+  label: string;
+}) {
+  return (
+    <div className="flex items-center justify-between px-3 pb-2 pt-5 text-[0.72rem] uppercase tracking-[0.16em] text-slate-500 first:pt-0">
+      <span>{label}</span>
+      <span>{detail}</span>
+    </div>
+  );
+}
+
+function SidebarTaskRow({
+  detail,
+  href,
+  isSelected,
+  onClick,
+  title,
+}: {
+  detail: string;
+  href: string;
+  isSelected: boolean;
+  onClick?: () => void;
+  title: string;
+}) {
+  return (
+    <a
+      aria-current={isSelected ? "location" : undefined}
+      className="admin-task-sidebar-row"
+      data-selected={isSelected ? "true" : "false"}
+      href={href}
+      onClick={onClick}
+    >
+      <span className="flex min-w-0 items-center gap-3">
+        <span aria-hidden="true" className="admin-task-sidebar-icon" />
+        <span className="truncate text-[0.97rem] tracking-[-0.03em]">
+          {title}
+        </span>
+      </span>
+      <span className="ml-3 shrink-0 text-sm font-normal tracking-[-0.02em] text-slate-500">
+        {detail}
+      </span>
+    </a>
+  );
+}
+
+function ToolbarIcon({
+  children,
+  title,
+}: {
+  children: ReactNode;
+  title: string;
+}) {
+  return (
+    <div
+      aria-label={title}
+      className="admin-task-toolbar-group"
+      role="img"
+      title={title}
+    >
+      <div className="admin-task-toolbar-icon-button">{children}</div>
+    </div>
+  );
+}
+
+function TaskPaneToolbar({
+  task,
+  showOauthDebugPanel,
+  onToggleOauthDebugPanel,
+}: {
+  task: Route.ComponentProps["loaderData"]["event"]["tasks"][number];
+  showOauthDebugPanel: boolean;
+  onToggleOauthDebugPanel: () => void;
+}) {
+  const subtitle = `${formatEnumLabel(task.type)} • ${formatTaskPointsLabel(task.points)}`;
+  const autoVerifyEnabled =
+    task.type === "SOCIAL_COMMENT" &&
+    task.platform === "FACEBOOK" &&
+    task.configJson?.autoVerify;
+  const nextActiveIntent = task.isActive ? "set-inactive" : "set-active";
+  const nextActiveLabel = task.isActive ? "Set inactive" : "Set active";
+  const nextActiveNote = task.isActive
+    ? "Hide this task from the live event flow."
+    : "Show this task in the live event flow.";
+  const oauthDebugLabel = showOauthDebugPanel
+    ? "Hide technical debug"
+    : "Show technical debug";
+  const oauthDebugNote = "Toggle the Facebook OAuth debug panel.";
+
+  return (
+    <div className="admin-task-toolbar mb-5">
+      <div className="admin-task-toolbar-bar">
+        <div className="admin-task-toolbar-cluster">
+          <div className="admin-task-toolbar-group">
+            <div className="admin-task-toolbar-pill">
+              <span
+                className="admin-task-toolbar-pill-dot"
+                data-tone={task.isActive ? "active" : "inactive"}
+              />
+              <span className="admin-task-toolbar-pill-label">
+                {task.isActive ? "Active" : "Inactive"}
+              </span>
+            </div>
+          </div>
+          {autoVerifyEnabled ? (
+            <ToolbarIcon title="Auto verify enabled">
+              <svg
+                aria-hidden="true"
+                className="size-[1.1rem]"
+                fill="none"
+                viewBox="0 0 20 20"
+              >
+                <path
+                  d="M10 2.8L11.8 7.1L16.2 8.9L11.8 10.7L10 15L8.2 10.7L3.8 8.9L8.2 7.1L10 2.8Z"
+                  stroke="currentColor"
+                  strokeLinejoin="round"
+                  strokeWidth="1.7"
+                />
+              </svg>
+            </ToolbarIcon>
+          ) : null}
+        </div>
+
+        <div className="admin-task-toolbar-title">
+          <h2>{task.title}</h2>
+          <p>{subtitle}</p>
+        </div>
+
+        <div className="admin-task-toolbar-cluster">
+          <details className="admin-task-toolbar-menu">
+            <summary
+              aria-label="Task actions"
+              className="admin-task-toolbar-group admin-task-toolbar-icon-button cursor-pointer"
+              title="Task actions"
+            >
+              <svg
+                aria-hidden="true"
+                className="size-[1.15rem]"
+                fill="none"
+                viewBox="0 0 20 20"
+              >
+                <circle cx="5" cy="10" fill="currentColor" r="1.3" />
+                <circle cx="10" cy="10" fill="currentColor" r="1.3" />
+                <circle cx="15" cy="10" fill="currentColor" r="1.3" />
+              </svg>
+            </summary>
+            <div className="admin-task-toolbar-menu-panel">
+              <p className="admin-task-toolbar-menu-label">Task actions</p>
+              <Form method="post">
+                <input name="intent" type="hidden" value={nextActiveIntent} />
+                <input name="taskId" type="hidden" value={task.id} />
+                <button className="admin-task-toolbar-menu-row" type="submit">
+                  <span className="admin-task-toolbar-menu-row-main">
+                    <span className="admin-task-toolbar-menu-row-icon">
+                      <svg
+                        aria-hidden="true"
+                        className="size-[1.1rem]"
+                        fill="none"
+                        viewBox="0 0 20 20"
+                      >
+                        <rect
+                          height="10"
+                          rx="5"
+                          stroke="currentColor"
+                          strokeWidth="1.6"
+                          width="16"
+                          x="2"
+                          y="5"
+                        />
+                        <circle
+                          cx={task.isActive ? "13" : "7"}
+                          cy="10"
+                          fill="currentColor"
+                          r="2.3"
+                        />
+                      </svg>
+                    </span>
+                    <span>
+                      <span className="admin-task-toolbar-menu-row-title">
+                        {nextActiveLabel}
+                      </span>
+                      <span className="admin-task-toolbar-menu-row-note">
+                        {nextActiveNote}
+                      </span>
+                    </span>
+                  </span>
+                  {task.isActive ? (
+                    <svg
+                      aria-hidden="true"
+                      className="size-[1.05rem] text-emerald-600"
+                      fill="none"
+                      viewBox="0 0 20 20"
+                    >
+                      <path
+                        d="M5.7 10.4L8.5 13.2L14.4 7.4"
+                        stroke="currentColor"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth="1.8"
+                      />
+                    </svg>
+                  ) : null}
+                </button>
+              </Form>
+              <button
+                className="admin-task-toolbar-menu-row"
+                onClick={(event) => {
+                  onToggleOauthDebugPanel();
+                  event.currentTarget
+                    .closest("details")
+                    ?.removeAttribute("open");
+                }}
+                type="button"
+              >
+                <span className="admin-task-toolbar-menu-row-main">
+                  <span className="admin-task-toolbar-menu-row-icon">
+                    <svg
+                      aria-hidden="true"
+                      className="size-[1.1rem]"
+                      fill="none"
+                      viewBox="0 0 20 20"
+                    >
+                      <path
+                        d="M10 4.2C6.1 4.2 2.85 6.58 1.7 10C2.85 13.42 6.1 15.8 10 15.8C13.9 15.8 17.15 13.42 18.3 10C17.15 6.58 13.9 4.2 10 4.2Z"
+                        stroke="currentColor"
+                        strokeWidth="1.6"
+                      />
+                      <circle
+                        cx="10"
+                        cy="10"
+                        r="2.3"
+                        stroke="currentColor"
+                        strokeWidth="1.6"
+                      />
+                    </svg>
+                  </span>
+                  <span>
+                    <span className="admin-task-toolbar-menu-row-title">
+                      {oauthDebugLabel}
+                    </span>
+                    <span className="admin-task-toolbar-menu-row-note">
+                      {oauthDebugNote}
+                    </span>
+                  </span>
+                </span>
+                {showOauthDebugPanel ? (
+                  <svg
+                    aria-hidden="true"
+                    className="size-[1.05rem] text-emerald-600"
+                    fill="none"
+                    viewBox="0 0 20 20"
+                  >
+                    <path
+                      d="M5.7 10.4L8.5 13.2L14.4 7.4"
+                      stroke="currentColor"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="1.8"
+                    />
+                  </svg>
+                ) : null}
+              </button>
+            </div>
+          </details>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function AdminEventTasks({
   actionData,
   loaderData,
@@ -1903,6 +2227,39 @@ export default function AdminEventTasks({
     pendingFacebookConnection,
   } =
     loaderData;
+  const defaultTaskAnchor =
+    event.tasks.length > 0 ? `task-${event.tasks[0].id}` : "task-create";
+  const [taskFilter, setTaskFilter] = useState("");
+  const [selectedAnchor, setSelectedAnchor] = useState(defaultTaskAnchor);
+  const [showOauthDebugPanel, setShowOauthDebugPanel] = useState(false);
+  const normalizedTaskFilter = normalizeTaskFilter(taskFilter);
+  const filteredTasks = event.tasks.filter((task) =>
+    taskMatchesFilter(task, normalizedTaskFilter),
+  );
+  const activeTasks = filteredTasks.filter((task) => task.isActive);
+  const inactiveTasks = filteredTasks.filter((task) => !task.isActive);
+  const selectedTaskId = selectedAnchor.startsWith("task-")
+    ? selectedAnchor.slice("task-".length)
+    : null;
+  const selectedTask =
+    selectedTaskId && selectedTaskId !== "create"
+      ? event.tasks.find((task) => task.id === selectedTaskId) ?? null
+      : null;
+
+  useEffect(() => {
+    function syncSelectedAnchor() {
+      setSelectedAnchor(
+        window.location.hash
+          ? decodeURIComponent(window.location.hash.slice(1))
+          : defaultTaskAnchor,
+      );
+    }
+
+    syncSelectedAnchor();
+    window.addEventListener("hashchange", syncSelectedAnchor);
+
+    return () => window.removeEventListener("hashchange", syncSelectedAnchor);
+  }, [defaultTaskAnchor]);
 
   return (
     <AdminShell
@@ -1910,104 +2267,213 @@ export default function AdminEventTasks({
       eventSlug={event.slug}
       title={`${event.name} tasks`}
     >
-      <div className="space-y-5">
-        {actionData && "error" in actionData ? (
-          <p className="rounded-lg bg-rose-100 px-4 py-3 text-sm font-medium text-rose-800">
-            {actionData.error}
-          </p>
-        ) : null}
-        {actionData && "success" in actionData ? (
-          <p className="rounded-lg bg-emerald-100 px-4 py-3 text-sm font-medium text-emerald-800">
-            {actionData.success}
-          </p>
-        ) : null}
-
-        <FacebookOnboardingCard
-          connectStatus={connectStatus}
-          connection={event.facebookConnection}
-          eventSlug={event.slug}
-          latestFacebookDebug={latestFacebookDebug}
-          pendingConnection={pendingFacebookConnection}
-        />
-
-        <AdminCard>
-          <h2 className="font-display text-xl font-semibold">Create task</h2>
-          <div className="mt-4">
-            <TaskForm
-              actionData={actionData}
-              buttonLabel="Create task"
-              facebookPostOptions={facebookPostOptions}
-              intent="create"
-            />
-          </div>
-        </AdminCard>
-
-        {event.tasks.length > 0 ? (
-          event.tasks.map((task) => (
-            <AdminCard key={task.id}>
-              <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      <div className="grid gap-5 xl:grid-cols-[20rem_minmax(0,1fr)]">
+        <aside className="xl:sticky xl:top-6 xl:self-start">
+          <div className="admin-task-sidebar rounded-[1.75rem] p-4">
+            <div className="flex items-center justify-between gap-3 pb-5">
+              <div>
                 <div>
-                  <h2 className="font-display text-xl font-semibold">
-                    {task.title}
-                  </h2>
-                  <p className="mt-1 text-sm text-slate-600">
-                    {task.type} - {task.points} points
+                  <p className="text-lg font-medium tracking-[-0.04em]">Tasks</p>
+                  <p className="text-xs uppercase tracking-[0.14em] text-slate-500">
+                    {event.tasks.length} configured
                   </p>
                 </div>
-                <div className="flex flex-wrap gap-2">
-                  <StatusBadge
-                    label={task.isActive ? "ACTIVE" : "INACTIVE"}
-                    tone={task.isActive ? "verified" : "neutral"}
+              </div>
+              <a
+                aria-label="Create task"
+                className="inline-flex size-11 items-center justify-center rounded-full border border-[var(--color-border)] bg-white/80 text-xl font-medium text-[var(--color-primary)] shadow-[0_12px_28px_-18px_rgba(0,0,0,0.35)] transition-transform duration-150 hover:-translate-y-0.5"
+                href="#task-create"
+                onClick={() => setSelectedAnchor("task-create")}
+              >
+                +
+              </a>
+            </div>
+
+            <label className="admin-task-sidebar-search flex items-center gap-3 rounded-full px-4 py-3">
+              <svg
+                aria-hidden="true"
+                className="size-4 shrink-0 text-slate-500"
+                fill="none"
+                viewBox="0 0 16 16"
+              >
+                <circle
+                  cx="7"
+                  cy="7"
+                  r="4.5"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                />
+                <path
+                  d="M10.5 10.5L13.5 13.5"
+                  stroke="currentColor"
+                  strokeLinecap="round"
+                  strokeWidth="1.5"
+                />
+              </svg>
+              <input
+                className="min-w-0 flex-1 bg-transparent text-[0.97rem] tracking-[-0.03em] text-slate-700 outline-none placeholder:text-slate-500"
+                onChange={(event) => setTaskFilter(event.target.value)}
+                placeholder="Search tasks"
+                type="search"
+                value={taskFilter}
+              />
+            </label>
+
+            <div className="mt-5 max-h-[calc(100vh-11rem)] overflow-y-auto pr-1">
+              {activeTasks.length > 0 ? (
+                <div>
+                  <SidebarSectionHeader
+                    detail={`${activeTasks.length}`}
+                    label="Active tasks"
                   />
-                  <StatusBadge
-                    label={
-                      task.requiresVerification
-                        ? "VERIFICATION"
-                        : "AUTO COMPLETE"
-                    }
-                    tone={task.requiresVerification ? "warning" : "neutral"}
+                  <div className="space-y-1">
+                    {activeTasks.map((task) => (
+                      <SidebarTaskRow
+                        detail={formatTaskPointsLabel(task.points)}
+                        href={`#task-${task.id}`}
+                        isSelected={selectedAnchor === `task-${task.id}`}
+                        key={task.id}
+                        onClick={() => setSelectedAnchor(`task-${task.id}`)}
+                        title={task.title}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              {inactiveTasks.length > 0 ? (
+                <div>
+                  <SidebarSectionHeader
+                    detail={`${inactiveTasks.length}`}
+                    label="Inactive tasks"
                   />
-                  {task.type === "SOCIAL_COMMENT" &&
-                  task.platform === "FACEBOOK" &&
-                  task.configJson?.autoVerify ? (
-                    <StatusBadge label="AUTO VERIFY" tone="verified" />
-                  ) : null}
+                  <div className="space-y-1">
+                    {inactiveTasks.map((task) => (
+                      <SidebarTaskRow
+                        detail={formatTaskPointsLabel(task.points)}
+                        href={`#task-${task.id}`}
+                        isSelected={selectedAnchor === `task-${task.id}`}
+                        key={task.id}
+                        onClick={() => setSelectedAnchor(`task-${task.id}`)}
+                        title={task.title}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              {filteredTasks.length === 0 ? (
+                <div className="px-3 pt-5 text-sm leading-6 text-slate-600">
+                  No tasks match the current search.
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </aside>
+
+        <div className="space-y-5">
+          {actionData && "error" in actionData ? (
+            <p className="rounded-lg bg-rose-100 px-4 py-3 text-sm font-medium text-rose-800">
+              {actionData.error}
+            </p>
+          ) : null}
+          {actionData && "success" in actionData ? (
+            <p className="rounded-lg bg-emerald-100 px-4 py-3 text-sm font-medium text-emerald-800">
+              {actionData.success}
+            </p>
+          ) : null}
+
+          {selectedTask ? (
+            <TaskPaneToolbar
+              onToggleOauthDebugPanel={() =>
+                setShowOauthDebugPanel((value) => !value)
+              }
+              showOauthDebugPanel={showOauthDebugPanel}
+              task={selectedTask}
+            />
+          ) : null}
+
+          <FacebookOnboardingCard
+            connectStatus={connectStatus}
+            connection={event.facebookConnection}
+            eventSlug={event.slug}
+            latestFacebookDebug={latestFacebookDebug}
+            pendingConnection={pendingFacebookConnection}
+            showOauthDebugPanel={showOauthDebugPanel}
+          />
+
+          {selectedAnchor === "task-create" ? (
+            <section className="scroll-mt-6" id="task-create">
+              <div className="px-1 py-1">
+                <h2 className="font-display text-xl font-semibold">
+                  Create task
+                </h2>
+                <div className="mt-4">
+                  <TaskForm
+                    actionData={actionData}
+                    buttonLabel="Create task"
+                    eventTasks={event.tasks}
+                    facebookPostOptions={facebookPostOptions}
+                    intent="create"
+                    key="task-create"
+                  />
                 </div>
               </div>
-              <TaskForm
-                actionData={actionData}
-                buttonLabel="Save task"
-                facebookPostOptions={facebookPostOptions}
-                intent="update"
-                task={task}
-              />
-              {task.type === "SOCIAL_COMMENT" &&
-              task.platform === "FACEBOOK" &&
-              task.configJson?.autoVerify ? (
-                <FacebookCommentTaskDebugPanel
-                  taskDebug={facebookCommentDebug.tasks.find(
-                    (entry) => entry.taskId === task.id,
-                  )}
+            </section>
+          ) : selectedTask ? (
+            <section
+              className="scroll-mt-6"
+              id={`task-${selectedTask.id}`}
+            >
+              <div className="px-1 py-1">
+                <TaskForm
+                  actionData={actionData}
+                  buttonLabel="Save task"
+                  eventTasks={event.tasks}
+                  facebookPostOptions={facebookPostOptions}
+                  intent="update"
+                  key={selectedTask.id}
+                  task={selectedTask}
                 />
-              ) : null}
-              {task.isActive ? (
-                <Form className="mt-3" method="post">
-                  <input name="intent" type="hidden" value="disable" />
-                  <input name="taskId" type="hidden" value={task.id} />
-                  <Button tone="secondary" type="submit">
-                    Disable task
-                  </Button>
-                </Form>
-              ) : null}
-            </AdminCard>
-          ))
-        ) : (
-          <AdminCard>
-            <p className="text-sm text-slate-700">
-              No tasks have been configured for this event.
-            </p>
-          </AdminCard>
-        )}
+                {selectedTask.type === "SOCIAL_COMMENT" &&
+                selectedTask.platform === "FACEBOOK" &&
+                selectedTask.configJson?.autoVerify ? (
+                  <FacebookCommentTaskDebugPanel
+                    taskDebug={facebookCommentDebug.tasks.find(
+                      (entry) => entry.taskId === selectedTask.id,
+                    )}
+                  />
+                ) : null}
+              </div>
+            </section>
+          ) : event.tasks.length > 0 ? (
+            <section className="scroll-mt-6">
+              <div className="px-1 py-1">
+                <p className="text-sm text-slate-700">
+                  Select a task from the sidebar to edit it.
+                </p>
+              </div>
+            </section>
+          ) : (
+            <section className="scroll-mt-6" id="task-create">
+              <div className="px-1 py-1">
+                <h2 className="font-display text-xl font-semibold">
+                  Create task
+                </h2>
+                <div className="mt-4">
+                  <TaskForm
+                    actionData={actionData}
+                    buttonLabel="Create task"
+                    eventTasks={event.tasks}
+                    facebookPostOptions={facebookPostOptions}
+                    intent="create"
+                    key="task-create-empty"
+                  />
+                </div>
+              </div>
+            </section>
+          )}
+        </div>
       </div>
     </AdminShell>
   );
