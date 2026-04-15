@@ -243,13 +243,30 @@ export async function subscribeInstagramAccountToWebhooks(
   accessToken: string,
   subscribedFields = ["comments"],
 ) {
-  return instagramGraphPostRequest<{ success?: boolean }>(
-    "/me/subscribed_apps",
-    accessToken,
-    {
-      subscribed_fields: subscribedFields.join(","),
-    },
-  );
+  try {
+    return await instagramGraphPostRequest<{ success?: boolean }>(
+      "/me/subscribed_apps",
+      accessToken,
+      {
+        subscribed_fields: subscribedFields.join(","),
+      },
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+
+    // Meta can reject `comments` on this subscription surface even when the
+    // Instagram webhook is already configured in the dashboard. In that case we
+    // keep the saved connection and rely on the dashboard webhook setup plus
+    // fallback reconciliation, instead of blocking task/config changes.
+    if (
+      message.includes("Param subscribed_fields") &&
+      message.includes('got "comments"')
+    ) {
+      return null;
+    }
+
+    throw error;
+  }
 }
 
 export function parseInstagramCommentEvents(payload: unknown) {
