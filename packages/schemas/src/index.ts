@@ -91,6 +91,7 @@ export const taskConfigSchema = z.object({
   commentInstructions: z.string().trim().min(1).optional(),
   autoVerify: z.boolean().optional(),
   facebookPostId: z.string().trim().min(1).optional(),
+  instagramMediaId: z.string().trim().min(1).optional(),
   stampRunKey: z.string().trim().min(1).optional(),
   stampRunLabel: z.string().trim().min(1).optional(),
 });
@@ -102,6 +103,15 @@ export const facebookCommentTaskConfigSchema = taskConfigSchema.extend({
   commentInstructions: z.string().trim().min(1).optional(),
   autoVerify: z.boolean().default(true),
   facebookPostId: z.string().trim().min(1),
+});
+
+export const instagramCommentTaskConfigSchema = taskConfigSchema.extend({
+  primaryUrl: z.string().url(),
+  requiredPrefix: z.string().trim().min(1),
+  requireVerificationCode: z.boolean().default(true),
+  commentInstructions: z.string().trim().min(1).optional(),
+  autoVerify: z.boolean().default(true),
+  instagramMediaId: z.string().trim().min(1),
 });
 
 export const eventSchema = z.object({
@@ -281,6 +291,7 @@ export const adminTaskCreateBodySchema = z.object(adminTaskWriteFields);
 export const adminTaskCreateBodyWithFacebookSourceSchema =
   adminTaskCreateBodySchema.extend({
     facebookSourcePageId: z.string().trim().min(1).optional(),
+    instagramSourceAccountId: z.string().trim().min(1).optional(),
   });
 
 export const adminTaskUpdateBodySchema = z
@@ -296,6 +307,7 @@ export const adminTaskUpdateBodySchema = z
     verificationType: adminTaskWriteFields.verificationType.optional(),
     configJson: adminTaskWriteFields.configJson,
     facebookSourcePageId: z.string().trim().min(1).optional(),
+    instagramSourceAccountId: z.string().trim().min(1).optional(),
   })
   .refine((body) => Object.keys(body).length > 0, {
     message: "At least one task field is required.",
@@ -326,6 +338,19 @@ export const adminEventDetailSchema = eventSchema.extend({
   participantCount: z.number().int().nonnegative(),
   leadCount: z.number().int().nonnegative(),
   facebookConnection: adminFacebookConnectionSchema.nullable().optional(),
+  instagramConnection: z
+    .object({
+      pageId: z.string(),
+      pageName: z.string().nullable(),
+      instagramAccountId: z.string(),
+      instagramUsername: z.string().nullable(),
+      hasAccessToken: z.boolean(),
+      tokenHint: z.string().nullable(),
+      tokenExpiresAt: z.string().nullable().optional(),
+      updatedAt: z.string(),
+    })
+    .nullable()
+    .optional(),
 });
 
 export const adminFacebookConnectionUpsertBodySchema = z.object({
@@ -365,6 +390,80 @@ export const adminFacebookPostOptionsResponseSchema = z.object({
 
 export const adminFacebookConnectionSelectBodySchema = z.object({
   pageId: z.string().trim().min(1),
+});
+
+export const adminInstagramConnectionUpsertBodySchema = z.object({
+  pageId: z.string().trim().min(1),
+  pageName: z.string().trim().min(1).optional(),
+  instagramAccountId: z.string().trim().min(1),
+  instagramUsername: z.string().trim().min(1).optional(),
+  accessToken: z.string().trim().min(1).optional(),
+  tokenExpiresAt: z.string().trim().min(1).optional(),
+});
+
+export const adminInstagramAccountOptionSchema = z.object({
+  pageId: z.string(),
+  pageName: z.string(),
+  instagramAccountId: z.string(),
+  instagramUsername: z.string().nullable(),
+});
+
+export const adminInstagramPendingConnectionSchema = z.object({
+  accounts: z.array(adminInstagramAccountOptionSchema),
+  expiresAt: z.string(),
+});
+
+export const adminInstagramMediaOptionSchema = z.object({
+  captionPreview: z.string(),
+  mediaId: z.string(),
+  mediaType: z.string().nullable(),
+  permalink: z.string().url().nullable(),
+  timestamp: z.string().nullable(),
+});
+
+export const adminInstagramMediaOptionsResponseSchema = z.object({
+  account: z
+    .object({
+      instagramAccountId: z.string(),
+      instagramUsername: z.string().nullable(),
+      pageId: z.string(),
+      pageName: z.string().nullable(),
+    })
+    .nullable(),
+  error: z.string().nullable(),
+  media: z.array(adminInstagramMediaOptionSchema),
+});
+
+export const adminInstagramConnectionSelectBodySchema = z.object({
+  instagramAccountId: z.string().trim().min(1),
+});
+
+export const adminInstagramConnectionDebugSchema = z.object({
+  createdAt: z.string(),
+  consumedAt: z.string().nullable(),
+  expiresAt: z.string(),
+  state: z.string(),
+  accounts: z.array(
+    z.object({
+      pageId: z.string(),
+      pageName: z.string(),
+      instagramAccountId: z.string(),
+      instagramUsername: z.string().nullable(),
+    }),
+  ),
+  rawPages: z.array(
+    z.object({
+      pageId: z.string().nullable(),
+      pageName: z.string().nullable(),
+      instagramAccountId: z.string().nullable(),
+      instagramUsername: z.string().nullable(),
+      hasInstagramAccount: z.boolean(),
+      hasPageAccessToken: z.boolean(),
+      tokenHint: z.string().nullable(),
+      error: z.string().nullable(),
+    }),
+  ),
+  warnings: z.array(z.string()),
 });
 
 export const adminFacebookConnectionDebugSchema = z.object({
@@ -505,6 +604,72 @@ export const adminFacebookCommentDebugResponseSchema = z.object({
   tasks: z.array(adminFacebookCommentTaskDebugSchema),
 });
 
+export const adminInstagramCommentTaskDebugSchema = z.object({
+  taskId: z.string(),
+  taskTitle: z.string(),
+  connectedInstagramAccountId: z.string().nullable(),
+  connectedInstagramUsername: z.string().nullable(),
+  connectedPageId: z.string().nullable(),
+  connectedPageName: z.string().nullable(),
+  instagramMediaId: z.string(),
+  primaryUrl: z.string().nullable(),
+  requiredPrefix: z.string(),
+  autoVerify: z.boolean(),
+  requireVerificationCode: z.boolean(),
+  pendingAttemptCount: z.number().int().nonnegative(),
+  verifiedAttemptCount: z.number().int().nonnegative(),
+  unmatchedCommentCount: z.number().int().nonnegative(),
+  liveCommentCount: z.number().int().nonnegative(),
+  liveLookupError: z.string().nullable(),
+  recentAttempts: z.array(
+    z.object({
+      awaitingAutoVerificationAt: z.string().nullable(),
+      expectedCommentText: z.string().nullable(),
+      matchedCommentId: z.string().nullable(),
+      matchedCommentText: z.string().nullable(),
+      participantEmail: z.string().nullable(),
+      participantName: z.string().nullable(),
+      participantSessionId: z.string(),
+      source: z.string().nullable(),
+      status: taskAttemptStatusSchema,
+      taskAttemptId: z.string(),
+      updatedAt: z.string(),
+      verificationCode: z.string(),
+      verifiedAutomaticallyAt: z.string().nullable(),
+    }),
+  ),
+  recentComments: z.array(
+    z.object({
+      commentText: z.string().nullable(),
+      createdAt: z.string(),
+      externalCommentId: z.string(),
+      externalPostId: z.string().nullable(),
+      matched: z.boolean(),
+      participantSessionId: z.string().nullable(),
+      participantVerificationCode: z.string().nullable(),
+      processedAt: z.string().nullable(),
+      taskAttemptId: z.string().nullable(),
+    }),
+  ),
+  liveComments: z.array(
+    z.object({
+      commentId: z.string(),
+      createdAt: z.string().nullable(),
+      matchingAttemptIds: z.array(z.string()),
+      matchingExpectedCommentTexts: z.array(z.string()),
+      matchingVerificationCodes: z.array(z.string()),
+      message: z.string().nullable(),
+      normalizedMessage: z.string().nullable(),
+      parentId: z.string().nullable(),
+      username: z.string().nullable(),
+    }),
+  ),
+});
+
+export const adminInstagramCommentDebugResponseSchema = z.object({
+  tasks: z.array(adminInstagramCommentTaskDebugSchema),
+});
+
 export const adminParticipantStatusCountsSchema = z.record(
   taskAttemptStatusSchema,
   z.number().int().nonnegative(),
@@ -625,6 +790,9 @@ export type TaskConfig = z.infer<typeof taskConfigSchema>;
 export type FacebookCommentTaskConfig = z.infer<
   typeof facebookCommentTaskConfigSchema
 >;
+export type InstagramCommentTaskConfig = z.infer<
+  typeof instagramCommentTaskConfigSchema
+>;
 export type TaskLike = z.infer<typeof taskSchema>;
 export type TaskAttemptLike = z.infer<typeof taskAttemptSchema>;
 export type ExperienceResponse = z.infer<typeof experienceResponseSchema>;
@@ -644,6 +812,12 @@ export type AdminFacebookPostOptionsResponse = z.infer<
 >;
 export type AdminFacebookCommentDebugResponse = z.infer<
   typeof adminFacebookCommentDebugResponseSchema
+>;
+export type AdminInstagramMediaOptionsResponse = z.infer<
+  typeof adminInstagramMediaOptionsResponseSchema
+>;
+export type AdminInstagramCommentDebugResponse = z.infer<
+  typeof adminInstagramCommentDebugResponseSchema
 >;
 export type AdminParticipant = z.infer<typeof adminParticipantSchema>;
 export type AdminLead = z.infer<typeof adminLeadSchema>;

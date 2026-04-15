@@ -95,7 +95,9 @@ model Event {
   sessions           ParticipantSession[]
   adminAccess        AdminEventAccess[]
   adminFacebookOauthStates AdminFacebookOAuthState[]
+  adminInstagramOauthStates AdminInstagramOAuthState[]
   facebookConnection EventFacebookConnection?
+  instagramConnection EventInstagramConnection?
 }
 
 model AdminAccount {
@@ -107,6 +109,7 @@ model AdminAccount {
   createdAt    DateTime           @default(now())
   updatedAt    DateTime           @updatedAt
   facebookOauthStates AdminFacebookOAuthState[]
+  instagramOauthStates AdminInstagramOAuthState[]
   eventAccess  AdminEventAccess[]
   sessions     AdminSession[]
 }
@@ -148,6 +151,23 @@ model AdminFacebookOAuthState {
   updatedAt      DateTime     @updatedAt
   adminAccount   AdminAccount @relation(fields: [adminAccountId], references: [id], onDelete: Cascade)
   event          Event        @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([adminAccountId, eventId])
+  @@index([expiresAt])
+}
+
+model AdminInstagramOAuthState {
+  id                String       @id @default(cuid())
+  adminAccountId    String
+  eventId           String
+  state             String       @unique
+  accountOptionsJson Json?
+  expiresAt         DateTime
+  consumedAt        DateTime?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  adminAccount      AdminAccount @relation(fields: [adminAccountId], references: [id], onDelete: Cascade)
+  event             Event        @relation(fields: [eventId], references: [id], onDelete: Cascade)
 
   @@index([adminAccountId, eventId])
   @@index([expiresAt])
@@ -274,6 +294,23 @@ model EventFacebookConnection {
   event           Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
 
   @@index([pageId])
+}
+
+model EventInstagramConnection {
+  id                String   @id @default(cuid())
+  eventId           String   @unique
+  pageId            String
+  pageName          String?
+  instagramAccountId String
+  instagramUsername String?
+  accessToken       String
+  tokenExpiresAt    DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  event             Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([pageId])
+  @@index([instagramAccountId])
 }
 
 model RewardEligibility {

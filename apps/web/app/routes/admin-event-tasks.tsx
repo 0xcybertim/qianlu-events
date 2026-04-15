@@ -11,7 +11,12 @@ import {
   fetchAdminFacebookConnectionDebug,
   fetchAdminFacebookPostOptions,
   fetchAdminFacebookPendingConnection,
+  fetchAdminInstagramCommentDebug,
+  fetchAdminInstagramConnectionDebug,
+  fetchAdminInstagramMediaOptions,
+  fetchAdminInstagramPendingConnection,
   selectAdminFacebookConnection,
+  selectAdminInstagramConnection,
   updateAdminTask,
 } from "../lib/api.server";
 import {
@@ -122,18 +127,17 @@ const taskTypeGuides: Record<TaskTypeValue, TaskTypeGuide> = {
     summary: "Participants share a social post or link. Manual verification is recommended.",
   },
   SOCIAL_COMMENT: {
-    allowedPlatforms: ["FACEBOOK"],
+    allowedPlatforms: ["FACEBOOK", "INSTAGRAM"],
     allowedVerificationTypes: ["AUTOMATIC"],
-    defaultPlatform: "FACEBOOK",
+    defaultPlatform: "INSTAGRAM",
     defaultRequiresVerification: true,
     defaultVerificationType: "AUTOMATIC",
-    detailHint: "This preset is locked to Facebook because the current automatic verification flow only supports Facebook Page comments.",
-    lockPlatform: true,
+    detailHint: "Use this for auto-verified Facebook or Instagram comments. The selected post/media owner must be connected in Meta first.",
     lockRequiresVerification: true,
     lockVerification: true,
     setupSteps: [
-      "Connect the Facebook Page that owns the target post.",
-      "Paste the public Facebook post URL and the Graph API post ID.",
+      "Connect the Facebook Page or Instagram professional account that owns the target post/media.",
+      "Paste the public post URL and the Graph API post/media ID, or choose it from the connected account.",
       "Choose the required prefix participants must comment, for example `QIANLU`.",
       "Keep participant verification code and auto verify turned on.",
     ],
@@ -141,7 +145,7 @@ const taskTypeGuides: Record<TaskTypeValue, TaskTypeGuide> = {
     showFacebookCommentFields: true,
     showProofHint: false,
     showSecondaryLinkFields: false,
-    summary: "Participants comment a generated code on a Facebook post and the system verifies it automatically through the webhook/API flow.",
+    summary: "Participants comment a generated code on a Facebook or Instagram post and the system verifies it automatically through the webhook/API flow.",
   },
   LEAD_FORM: {
     allowedPlatforms: ["EMAIL"],
@@ -361,6 +365,10 @@ function getApiBaseUrl() {
 
 function getFacebookOauthStartUrl(eventSlug: string) {
   return `/admin/events/${encodeURIComponent(eventSlug)}/facebook-oauth/start`;
+}
+
+function getInstagramOauthStartUrl(eventSlug: string) {
+  return `/admin/events/${encodeURIComponent(eventSlug)}/instagram-oauth/start`;
 }
 
 function formatFacebookSourceLabel(source: string) {
@@ -740,6 +748,197 @@ function FacebookOnboardingCard({
   );
 }
 
+function InstagramOnboardingCard({
+  connectStatus,
+  connection,
+  eventSlug,
+  latestInstagramDebug,
+  pendingConnection,
+}: {
+  connectStatus?: string | null;
+  connection?: {
+    hasAccessToken: boolean;
+    instagramAccountId: string;
+    instagramUsername: string | null;
+    pageId: string;
+    pageName: string | null;
+    tokenHint: string | null;
+    tokenExpiresAt?: string | null;
+    updatedAt: string;
+  } | null;
+  eventSlug: string;
+  latestInstagramDebug?: {
+    accounts: {
+      instagramAccountId: string;
+      instagramUsername: string | null;
+      pageId: string;
+      pageName: string;
+    }[];
+    consumedAt: string | null;
+    createdAt: string;
+    expiresAt: string;
+    rawPages: {
+      error: string | null;
+      hasInstagramAccount: boolean;
+      hasPageAccessToken: boolean;
+      instagramAccountId: string | null;
+      instagramUsername: string | null;
+      pageId: string | null;
+      pageName: string | null;
+      tokenHint: string | null;
+    }[];
+    state: string;
+    warnings: string[];
+  } | null;
+  pendingConnection?: {
+    accounts: {
+      instagramAccountId: string;
+      instagramUsername: string | null;
+      pageId: string;
+      pageName: string;
+    }[];
+    expiresAt: string;
+  } | null;
+}) {
+  const [showDebugDetails, setShowDebugDetails] = useState(false);
+  const instagramOauthStartUrl = getInstagramOauthStartUrl(eventSlug);
+  const connectMessage =
+    connectStatus === "connected"
+      ? "Instagram professional account connected."
+      : connectStatus === "select-account"
+        ? "Choose which Instagram professional account should be used for this event."
+        : connectStatus === "no-accounts"
+          ? "Meta login succeeded, but no Instagram professional accounts were returned."
+          : connectStatus === "oauth-denied"
+            ? "Instagram connection was cancelled before completion."
+            : connectStatus === "connect-failed"
+              ? "Instagram connection failed. Check the Meta app settings and try again."
+              : null;
+
+  return (
+    <div className="space-y-0 px-1 py-1">
+      {connectMessage ? (
+        <p className="rounded-2xl bg-white/70 px-4 py-3 text-sm leading-6 text-slate-700">
+          {connectMessage}
+        </p>
+      ) : null}
+
+      <div className="mt-4 rounded-2xl bg-white/70 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-medium tracking-[-0.03em] text-slate-900">
+              {connection
+                ? `Connected to @${connection.instagramUsername ?? "unknown"}`
+                : "No Instagram professional account connected"}
+            </p>
+            <p className="mt-1 text-xs uppercase tracking-[0.14em] text-slate-500">
+              Requires a professional account linked to a Facebook Page. The account owner must be public for comment webhooks.
+            </p>
+          </div>
+          <a
+            className="inline-flex min-h-11 items-center justify-center rounded-full border border-[var(--color-border)] bg-white px-4 py-2 text-sm font-semibold text-slate-900 transition-colors hover:bg-slate-50"
+            href={instagramOauthStartUrl}
+          >
+            {connection ? "Reconnect" : "Connect"}
+          </a>
+        </div>
+      </div>
+
+      {pendingConnection && pendingConnection.accounts.length > 0 ? (
+        <Form className="mt-4 space-y-4" method="post">
+          <input name="intent" type="hidden" value="select-instagram-account" />
+          <AdminField label="Choose Instagram professional account">
+            <select className={adminInputClass} name="selectedInstagramAccountId">
+              {pendingConnection.accounts.map((account) => (
+                <option
+                  key={account.instagramAccountId}
+                  value={account.instagramAccountId}
+                >
+                  @{account.instagramUsername ?? "unknown"} via {account.pageName} (
+                  {account.instagramAccountId})
+                </option>
+              ))}
+            </select>
+          </AdminField>
+          <Button type="submit">Use selected account</Button>
+        </Form>
+      ) : null}
+
+      <div className="mt-4 rounded-2xl bg-white/70 p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+              Instagram limitations
+            </p>
+            <p className="mt-2 text-sm leading-6 text-slate-700">
+              Meta only delivers real comment webhooks when the app is Live and the
+              `comments` field has Advanced Access.
+            </p>
+          </div>
+          <button
+            className="inline-flex min-h-11 items-center justify-center rounded-full border border-[var(--color-border)] bg-white px-4 py-2 text-sm font-semibold text-slate-900 transition-colors hover:bg-slate-50"
+            onClick={() => setShowDebugDetails((value) => !value)}
+            type="button"
+          >
+            {showDebugDetails ? "Hide technical debug" : "Show technical debug"}
+          </button>
+        </div>
+        {showDebugDetails ? (
+          <div className="mt-4 space-y-3 text-sm leading-6 text-slate-700">
+            {connection ? (
+              <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] px-4 py-3">
+                <p>
+                  Connected account: <code>{connection.instagramAccountId}</code>
+                </p>
+                <p>
+                  Linked page: <code>{connection.pageId}</code>
+                </p>
+                {connection.tokenHint ? <p>Token hint: {connection.tokenHint}</p> : null}
+              </div>
+            ) : null}
+            {latestInstagramDebug ? (
+              <>
+                <p>
+                  Last OAuth attempt{" "}
+                  {new Intl.DateTimeFormat("en", {
+                    dateStyle: "medium",
+                    timeStyle: "short",
+                  }).format(new Date(latestInstagramDebug.createdAt))}
+                  .
+                </p>
+                {latestInstagramDebug.accounts.length > 0 ? (
+                  <ul className="space-y-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] px-4 py-3">
+                    {latestInstagramDebug.accounts.map((account) => (
+                      <li
+                        className="font-mono text-xs leading-6 text-slate-900"
+                        key={account.instagramAccountId}
+                      >
+                        @{account.instagramUsername ?? "unknown"} ({account.instagramAccountId}) via{" "}
+                        {account.pageName} ({account.pageId})
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+                {latestInstagramDebug.warnings.length > 0 ? (
+                  <ul className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-6 text-amber-900">
+                    {latestInstagramDebug.warnings.map((warning) => (
+                      <li key={warning}>{warning}</li>
+                    ))}
+                  </ul>
+                ) : null}
+              </>
+            ) : (
+              <p className="text-sm leading-6 text-slate-700">
+                No Instagram OAuth debug information has been recorded for this event yet.
+              </p>
+            )}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function readOptional(formData: FormData, key: string) {
   const value = formData.get(key)?.toString().trim();
 
@@ -749,26 +948,29 @@ function readOptional(formData: FormData, key: string) {
 function parseTaskForm(formData: FormData) {
   const type = formData.get("type")?.toString() ?? "SOCIAL_FOLLOW";
   const platform = formData.get("platform")?.toString() ?? "NONE";
-  const isFacebookCommentPreset =
-    type === "SOCIAL_COMMENT" && platform === "FACEBOOK";
+  const isSocialCommentPreset = type === "SOCIAL_COMMENT" && (
+    platform === "FACEBOOK" || platform === "INSTAGRAM"
+  );
   const primaryLabel = readOptional(formData, "primaryLabel");
   const configJson = {
     primaryUrl: readOptional(formData, "primaryUrl"),
     secondaryUrl: readOptional(formData, "secondaryUrl"),
-    primaryLabel: isFacebookCommentPreset
-      ? (primaryLabel ?? "Open Facebook post")
+    primaryLabel: isSocialCommentPreset
+      ? (primaryLabel ??
+        (platform === "INSTAGRAM" ? "Open Instagram post" : "Open Facebook post"))
       : primaryLabel,
     secondaryLabel: readOptional(formData, "secondaryLabel"),
     proofHint: readOptional(formData, "proofHint"),
     requiredPrefix: readOptional(formData, "requiredPrefix"),
     commentInstructions: readOptional(formData, "commentInstructions"),
     facebookPostId: readOptional(formData, "facebookPostId"),
-    requireVerificationCode: isFacebookCommentPreset
+    instagramMediaId: readOptional(formData, "instagramMediaId"),
+    requireVerificationCode: isSocialCommentPreset
       ? true
       : formData.get("hasRequireVerificationCode")
         ? formData.get("requireVerificationCode") === "on"
         : undefined,
-    autoVerify: isFacebookCommentPreset
+    autoVerify: isSocialCommentPreset
       ? true
       : formData.get("hasAutoVerify")
         ? formData.get("autoVerify") === "on"
@@ -791,6 +993,7 @@ function parseTaskForm(formData: FormData) {
     requiresVerification: formData.get("requiresVerification") === "on",
     verificationType: formData.get("verificationType")?.toString() ?? "NONE",
     facebookSourcePageId: readOptional(formData, "facebookSourcePageId"),
+    instagramSourceAccountId: readOptional(formData, "instagramSourceAccountId"),
     configJson: Object.keys(compactConfig).length > 0 ? compactConfig : null,
   };
 }
@@ -822,6 +1025,10 @@ export async function loader({ params, request }: Route.LoaderArgs) {
       facebookPostOptions,
       latestFacebookDebug,
       pendingFacebookConnection,
+      instagramCommentDebug,
+      instagramMediaOptions,
+      latestInstagramDebug,
+      pendingInstagramConnection,
     ] =
       await Promise.all([
         fetchAdminEvent(params.eventSlug, request),
@@ -829,6 +1036,10 @@ export async function loader({ params, request }: Route.LoaderArgs) {
         fetchAdminFacebookPostOptions(params.eventSlug, request),
         fetchAdminFacebookConnectionDebug(params.eventSlug, request),
         fetchAdminFacebookPendingConnection(params.eventSlug, request),
+        fetchAdminInstagramCommentDebug(params.eventSlug, request),
+        fetchAdminInstagramMediaOptions(params.eventSlug, request),
+        fetchAdminInstagramConnectionDebug(params.eventSlug, request),
+        fetchAdminInstagramPendingConnection(params.eventSlug, request),
       ]);
     const url = new URL(request.url);
 
@@ -837,8 +1048,13 @@ export async function loader({ params, request }: Route.LoaderArgs) {
       event,
       facebookCommentDebug,
       facebookPostOptions,
+      instagramCommentDebug,
+      instagramConnectStatus: url.searchParams.get("instagramConnect"),
+      instagramMediaOptions,
+      latestInstagramDebug,
       latestFacebookDebug,
       pendingFacebookConnection,
+      pendingInstagramConnection,
     };
   } catch {
     return redirect("/admin");
@@ -930,6 +1146,22 @@ export async function action({ params, request }: Route.ActionArgs) {
         success: "Facebook Page connected.",
       };
     }
+
+    if (intent === "select-instagram-account") {
+      await selectAdminInstagramConnection(
+        params.eventSlug,
+        {
+          instagramAccountId:
+            formData.get("selectedInstagramAccountId")?.toString() ?? "",
+        },
+        request,
+      );
+
+      return {
+        formKey,
+        success: "Instagram professional account connected.",
+      };
+    }
   } catch (error) {
     return {
       formKey,
@@ -948,6 +1180,7 @@ function TaskForm({
   buttonLabel,
   eventTasks,
   facebookPostOptions,
+  instagramMediaOptions,
   intent,
   task,
 }: {
@@ -974,6 +1207,22 @@ function TaskForm({
       }[];
     }>;
   };
+  instagramMediaOptions: {
+    account: {
+      instagramAccountId: string;
+      instagramUsername: string | null;
+      pageId: string;
+      pageName: string | null;
+    } | null;
+    error: string | null;
+    media: Array<{
+      captionPreview: string;
+      mediaId: string;
+      mediaType: string | null;
+      permalink: string | null;
+      timestamp: string | null;
+    }>;
+  };
   intent: "create" | "update";
   task?: {
     id: string;
@@ -995,6 +1244,7 @@ function TaskForm({
       requiredPrefix?: string;
       commentInstructions?: string;
       facebookPostId?: string;
+      instagramMediaId?: string;
       requireVerificationCode?: boolean;
       autoVerify?: boolean;
     } | null;
@@ -1022,9 +1272,14 @@ function TaskForm({
   const availableVerificationTypes = currentGuide.lockVerification
     ? [currentGuide.defaultVerificationType]
     : currentGuide.allowedVerificationTypes;
+  const isSocialCommentPreset =
+    selectedType === "SOCIAL_COMMENT" &&
+    (selectedPlatform === "FACEBOOK" || selectedPlatform === "INSTAGRAM");
   const isFacebookCommentPreset =
-    selectedType === "SOCIAL_COMMENT" && selectedPlatform === "FACEBOOK";
-  const shouldSimplifySocialCommentForm = isFacebookCommentPreset;
+    isSocialCommentPreset && selectedPlatform === "FACEBOOK";
+  const isInstagramCommentPreset =
+    isSocialCommentPreset && selectedPlatform === "INSTAGRAM";
+  const shouldSimplifySocialCommentForm = isSocialCommentPreset;
   const availableFacebookPages = facebookPostOptions.pages;
   const initialSourcePageId =
     task?.configJson?.facebookPostId && availableFacebookPages.some((page) =>
@@ -1061,6 +1316,24 @@ function TaskForm({
       ? selectedFacebookPage?.posts.find((post) => post.postId === selectedFacebookPostId) ??
         null
       : null;
+  const instagramAccount = instagramMediaOptions.account;
+  const availableInstagramMedia = instagramMediaOptions.media;
+  const initialSavedInstagramMediaId = task?.configJson?.instagramMediaId ?? "";
+  const matchingSavedInstagramMedia =
+    availableInstagramMedia.find((media) => media.mediaId === initialSavedInstagramMediaId) ??
+    null;
+  const [manualInstagramMediaEntry, setManualInstagramMediaEntry] = useState(
+    initialSavedInstagramMediaId.length > 0 && !matchingSavedInstagramMedia,
+  );
+  const [selectedInstagramMediaId, setSelectedInstagramMediaId] = useState(
+    matchingSavedInstagramMedia?.mediaId ?? "",
+  );
+  const [instagramMediaIdValue, setInstagramMediaIdValue] = useState(
+    matchingSavedInstagramMedia?.mediaId ?? initialSavedInstagramMediaId,
+  );
+  const [instagramPrimaryUrlValue, setInstagramPrimaryUrlValue] = useState(
+    matchingSavedInstagramMedia?.permalink ?? task?.configJson?.primaryUrl ?? "",
+  );
   const existingCommentPrefixes = eventTasks
     .filter((entry) => entry.id !== task?.id)
     .map((entry) => entry.configJson?.requiredPrefix)
@@ -1070,7 +1343,7 @@ function TaskForm({
     buildUniqueCommentPrefix({
       existingPrefixes: existingCommentPrefixes,
       fallback: "COMMENT",
-      title: task?.title ?? "Comment on our Facebook post",
+      title: task?.title ?? "Comment on our post",
     });
   const activeFormKey = navigation.formData?.get("formKey")?.toString() ?? "";
   const isSubmittingThisForm =
@@ -1113,6 +1386,17 @@ function TaskForm({
       setFacebookPostIdValue(nextPage.posts[0].postId);
       setFacebookPrimaryUrlValue(nextPage.posts[0].permalinkUrl ?? "");
     }
+  }
+
+  function handleInstagramMediaSelect(nextMediaId: string) {
+    setSelectedInstagramMediaId(nextMediaId);
+
+    const selectedMedia =
+      availableInstagramMedia.find((media) => media.mediaId === nextMediaId) ??
+      null;
+
+    setInstagramMediaIdValue(selectedMedia?.mediaId ?? "");
+    setInstagramPrimaryUrlValue(selectedMedia?.permalink ?? "");
   }
 
   return (
@@ -1353,15 +1637,18 @@ function TaskForm({
         <AdminField
           label={shouldSimplifySocialCommentForm ? "Button text" : "Primary label"}
         >
-          <input
-            className={adminInputClass}
-            defaultValue={
-              shouldSimplifySocialCommentForm
-                ? (task?.configJson?.primaryLabel ?? "Open Facebook post")
-                : (task?.configJson?.primaryLabel ?? "")
-            }
-            name="primaryLabel"
-          />
+            <input
+              className={adminInputClass}
+              defaultValue={
+                shouldSimplifySocialCommentForm
+                  ? (task?.configJson?.primaryLabel ??
+                    (isInstagramCommentPreset
+                      ? "Open Instagram post"
+                      : "Open Facebook post"))
+                  : (task?.configJson?.primaryLabel ?? "")
+              }
+              name="primaryLabel"
+            />
         </AdminField>
         {currentGuide.showSecondaryLinkFields ? (
           <>
@@ -1394,143 +1681,262 @@ function TaskForm({
       ) : null}
       {currentGuide.showFacebookCommentFields ? (
         <>
-          <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-4">
-            <p className="text-sm font-semibold text-slate-900">
-              Source Page and post
-            </p>
-            {facebookPostOptions.error ? (
-              <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
-                {facebookPostOptions.error}
-              </p>
-            ) : null}
-            {availableFacebookPages.length > 0 ? (
-              <div className="mt-4 space-y-3">
-                <AdminField label="Choose source Facebook Page">
-                  <select
-                    className={adminInputClass}
-                    name="facebookSourcePageId"
-                    onChange={(event) => handleFacebookPageSelect(event.target.value)}
-                    required
-                    value={selectedFacebookPageId}
-                  >
-                    <option value="">Select a Facebook Page</option>
-                    {availableFacebookPages.map((page) => (
-                      <option key={page.pageId} value={page.pageId}>
-                        {page.pageName} ({page.pageId})
-                      </option>
-                    ))}
-                  </select>
-                </AdminField>
-              </div>
-            ) : null}
-            {!manualFacebookPostEntry && (selectedFacebookPage?.posts.length ?? 0) > 0 ? (
-              <div className="mt-4 space-y-3">
-                <AdminField label="Choose recent post from connected Page">
-                  <select
-                    className={adminInputClass}
-                    onChange={(event) => handleFacebookPostSelect(event.target.value)}
-                    required
-                    value={selectedFacebookPostId}
-                  >
-                    <option value="">Select a Facebook post</option>
-                    {selectedFacebookPage?.posts.map((post) => (
-                      <option key={post.postId} value={post.postId}>
-                        {post.createdAt
-                          ? `${new Intl.DateTimeFormat("en", {
-                              dateStyle: "medium",
-                            }).format(new Date(post.createdAt))} - `
-                          : ""}
-                        {post.messagePreview}
-                      </option>
-                    ))}
-                  </select>
-                </AdminField>
-                {selectedFacebookPost ? (
-                  <div className="rounded-xl bg-white px-4 py-3 text-sm leading-6 text-slate-700">
-                    <p>
-                      Graph post ID: <code>{selectedFacebookPost.postId}</code>
-                    </p>
-                    {selectedFacebookPost.permalinkUrl ? (
-                      <p>
-                        Permalink:{" "}
-                        <a
-                          className="underline"
-                          href={selectedFacebookPost.permalinkUrl}
-                          rel="noreferrer"
-                          target="_blank"
-                        >
-                          {selectedFacebookPost.permalinkUrl}
-                        </a>
+          {isFacebookCommentPreset ? (
+            <>
+              <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-4">
+                <p className="text-sm font-semibold text-slate-900">
+                  Source Page and post
+                </p>
+                {facebookPostOptions.error ? (
+                  <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
+                    {facebookPostOptions.error}
+                  </p>
+                ) : null}
+                {availableFacebookPages.length > 0 ? (
+                  <div className="mt-4 space-y-3">
+                    <AdminField label="Choose source Facebook Page">
+                      <select
+                        className={adminInputClass}
+                        name="facebookSourcePageId"
+                        onChange={(event) => handleFacebookPageSelect(event.target.value)}
+                        required
+                        value={selectedFacebookPageId}
+                      >
+                        <option value="">Select a Facebook Page</option>
+                        {availableFacebookPages.map((page) => (
+                          <option key={page.pageId} value={page.pageId}>
+                            {page.pageName} ({page.pageId})
+                          </option>
+                        ))}
+                      </select>
+                    </AdminField>
+                  </div>
+                ) : null}
+                {!manualFacebookPostEntry && (selectedFacebookPage?.posts.length ?? 0) > 0 ? (
+                  <div className="mt-4 space-y-3">
+                    <AdminField label="Choose recent post from connected Page">
+                      <select
+                        className={adminInputClass}
+                        onChange={(event) => handleFacebookPostSelect(event.target.value)}
+                        required
+                        value={selectedFacebookPostId}
+                      >
+                        <option value="">Select a Facebook post</option>
+                        {selectedFacebookPage?.posts.map((post) => (
+                          <option key={post.postId} value={post.postId}>
+                            {post.createdAt
+                              ? `${new Intl.DateTimeFormat("en", {
+                                  dateStyle: "medium",
+                                }).format(new Date(post.createdAt))} - `
+                              : ""}
+                            {post.messagePreview}
+                          </option>
+                        ))}
+                      </select>
+                    </AdminField>
+                    {selectedFacebookPost ? (
+                      <div className="rounded-xl bg-white px-4 py-3 text-sm leading-6 text-slate-700">
+                        <p>
+                          Graph post ID: <code>{selectedFacebookPost.postId}</code>
+                        </p>
+                        {selectedFacebookPost.permalinkUrl ? (
+                          <p>
+                            Permalink:{" "}
+                            <a
+                              className="underline"
+                              href={selectedFacebookPost.permalinkUrl}
+                              rel="noreferrer"
+                              target="_blank"
+                            >
+                              {selectedFacebookPost.permalinkUrl}
+                            </a>
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    <button
+                      className="text-sm font-semibold text-slate-900 underline"
+                      onClick={() => setManualFacebookPostEntry(true)}
+                      type="button"
+                    >
+                      Enter post details manually instead
+                    </button>
+                  </div>
+                ) : (
+                  <div className="mt-4 space-y-3">
+                    {(selectedFacebookPage?.posts.length ?? 0) > 0 ? (
+                      <button
+                        className="text-sm font-semibold text-slate-900 underline"
+                        onClick={() => {
+                          setManualFacebookPostEntry(false);
+
+                          if (!selectedFacebookPostId && selectedFacebookPage?.posts[0]) {
+                            handleFacebookPostSelect(selectedFacebookPage.posts[0].postId);
+                          }
+                        }}
+                        type="button"
+                      >
+                        Choose from recent connected Page posts instead
+                      </button>
+                    ) : null}
+                    {selectedFacebookPage && selectedFacebookPage.posts.length === 0 ? (
+                      <p className="text-sm leading-6 text-slate-700">
+                        No published posts were returned for this Page.
                       </p>
                     ) : null}
                   </div>
-                ) : null}
-                <button
-                  className="text-sm font-semibold text-slate-900 underline"
-                  onClick={() => setManualFacebookPostEntry(true)}
-                  type="button"
-                >
-                  Enter post details manually instead
-                </button>
+                )}
               </div>
-            ) : (
-              <div className="mt-4 space-y-3">
-                {(selectedFacebookPage?.posts.length ?? 0) > 0 ? (
-                  <button
-                    className="text-sm font-semibold text-slate-900 underline"
-                    onClick={() => {
-                      setManualFacebookPostEntry(false);
-
-                      if (!selectedFacebookPostId && selectedFacebookPage?.posts[0]) {
-                        handleFacebookPostSelect(selectedFacebookPage.posts[0].postId);
-                      }
-                    }}
-                    type="button"
-                  >
-                    Choose from recent connected Page posts instead
-                  </button>
-                ) : null}
-                {selectedFacebookPage && selectedFacebookPage.posts.length === 0 ? (
-                  <p className="text-sm leading-6 text-slate-700">
-                    No published posts were returned for this Page.
+              <div className="grid gap-3 sm:grid-cols-2">
+                <AdminField label="Required prefix">
+                  <input
+                    className={adminInputClass}
+                    defaultValue={defaultRequiredPrefix}
+                    name="requiredPrefix"
+                    placeholder="QIANLU"
+                    required
+                  />
+                </AdminField>
+                <AdminField label="Facebook post ID">
+                  <input
+                    className={adminInputClass}
+                    name="facebookPostId"
+                    onChange={(event) => setFacebookPostIdValue(event.target.value)}
+                    placeholder="pageid_postid"
+                    readOnly={!manualFacebookPostEntry}
+                    required
+                    value={facebookPostIdValue}
+                  />
+                </AdminField>
+              </div>
+              <AdminField label="Facebook post URL">
+                <input
+                  className={adminInputClass}
+                  name="primaryUrl"
+                  onChange={(event) => setFacebookPrimaryUrlValue(event.target.value)}
+                  readOnly={!manualFacebookPostEntry}
+                  required
+                  type="url"
+                  value={facebookPrimaryUrlValue}
+                />
+              </AdminField>
+            </>
+          ) : isInstagramCommentPreset ? (
+            <>
+              <input
+                name="instagramSourceAccountId"
+                type="hidden"
+                value={instagramAccount?.instagramAccountId ?? ""}
+              />
+              <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-4">
+                <p className="text-sm font-semibold text-slate-900">
+                  Connected Instagram account and media
+                </p>
+                {instagramMediaOptions.error ? (
+                  <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
+                    {instagramMediaOptions.error}
                   </p>
                 ) : null}
+                {instagramAccount ? (
+                  <div className="mt-4 rounded-xl bg-white px-4 py-3 text-sm leading-6 text-slate-700">
+                    <p>
+                      Account: <code>@{instagramAccount.instagramUsername ?? "unknown"}</code>
+                    </p>
+                    <p>
+                      Linked Page: <code>{instagramAccount.pageName ?? "Unnamed Page"}</code>
+                    </p>
+                  </div>
+                ) : null}
+                {!manualInstagramMediaEntry && availableInstagramMedia.length > 0 ? (
+                  <div className="mt-4 space-y-3">
+                    <AdminField label="Choose recent media from connected account">
+                      <select
+                        className={adminInputClass}
+                        onChange={(event) => handleInstagramMediaSelect(event.target.value)}
+                        required
+                        value={selectedInstagramMediaId}
+                      >
+                        <option value="">Select Instagram media</option>
+                        {availableInstagramMedia.map((media) => (
+                          <option key={media.mediaId} value={media.mediaId}>
+                            {media.timestamp
+                              ? `${new Intl.DateTimeFormat("en", {
+                                  dateStyle: "medium",
+                                }).format(new Date(media.timestamp))} - `
+                              : ""}
+                            {media.captionPreview}
+                          </option>
+                        ))}
+                      </select>
+                    </AdminField>
+                    <button
+                      className="text-sm font-semibold text-slate-900 underline"
+                      onClick={() => setManualInstagramMediaEntry(true)}
+                      type="button"
+                    >
+                      Enter media details manually instead
+                    </button>
+                  </div>
+                ) : (
+                  <div className="mt-4 space-y-3">
+                    {availableInstagramMedia.length > 0 ? (
+                      <button
+                        className="text-sm font-semibold text-slate-900 underline"
+                        onClick={() => {
+                          setManualInstagramMediaEntry(false);
+
+                          if (!selectedInstagramMediaId && availableInstagramMedia[0]) {
+                            handleInstagramMediaSelect(availableInstagramMedia[0].mediaId);
+                          }
+                        }}
+                        type="button"
+                      >
+                        Choose from recent connected media instead
+                      </button>
+                    ) : null}
+                    {instagramAccount && availableInstagramMedia.length === 0 ? (
+                      <p className="text-sm leading-6 text-slate-700">
+                        No recent media was returned for this Instagram account.
+                      </p>
+                    ) : null}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <AdminField label="Required prefix">
-              <input
-                className={adminInputClass}
-                defaultValue={defaultRequiredPrefix}
-                name="requiredPrefix"
-                placeholder="QIANLU"
-                required
-              />
-            </AdminField>
-            <AdminField label="Facebook post ID">
-              <input
-                className={adminInputClass}
-                name="facebookPostId"
-                onChange={(event) => setFacebookPostIdValue(event.target.value)}
-                placeholder="pageid_postid"
-                readOnly={!manualFacebookPostEntry}
-                required
-                value={facebookPostIdValue}
-              />
-            </AdminField>
-          </div>
-          <AdminField label="Facebook post URL">
-            <input
-              className={adminInputClass}
-              name="primaryUrl"
-              onChange={(event) => setFacebookPrimaryUrlValue(event.target.value)}
-              readOnly={!manualFacebookPostEntry}
-              required
-              type="url"
-              value={facebookPrimaryUrlValue}
-            />
-          </AdminField>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <AdminField label="Required prefix">
+                  <input
+                    className={adminInputClass}
+                    defaultValue={defaultRequiredPrefix}
+                    name="requiredPrefix"
+                    placeholder="QIANLU"
+                    required
+                  />
+                </AdminField>
+                <AdminField label="Instagram media ID">
+                  <input
+                    className={adminInputClass}
+                    name="instagramMediaId"
+                    onChange={(event) => setInstagramMediaIdValue(event.target.value)}
+                    placeholder="1789..."
+                    readOnly={!manualInstagramMediaEntry}
+                    required
+                    value={instagramMediaIdValue}
+                  />
+                </AdminField>
+              </div>
+              <AdminField label="Instagram post URL">
+                <input
+                  className={adminInputClass}
+                  name="primaryUrl"
+                  onChange={(event) => setInstagramPrimaryUrlValue(event.target.value)}
+                  readOnly={!manualInstagramMediaEntry}
+                  required
+                  type="url"
+                  value={instagramPrimaryUrlValue}
+                />
+              </AdminField>
+            </>
+          ) : null}
         </>
       ) : null}
       {currentGuide.showCommentAutomationOptions && !shouldSimplifySocialCommentForm ? (
@@ -1941,6 +2347,291 @@ function FacebookCommentTaskDebugPanel({
   );
 }
 
+function InstagramCommentTaskDebugPanel({
+  taskDebug,
+}: {
+  taskDebug?: {
+    autoVerify: boolean;
+    connectedInstagramAccountId: string | null;
+    connectedInstagramUsername: string | null;
+    connectedPageId: string | null;
+    connectedPageName: string | null;
+    instagramMediaId: string;
+    liveCommentCount: number;
+    liveComments: {
+      commentId: string;
+      createdAt: string | null;
+      matchingAttemptIds: string[];
+      matchingExpectedCommentTexts: string[];
+      matchingVerificationCodes: string[];
+      message: string | null;
+      normalizedMessage: string | null;
+      parentId: string | null;
+      username: string | null;
+    }[];
+    liveLookupError: string | null;
+    pendingAttemptCount: number;
+    primaryUrl: string | null;
+    recentAttempts: {
+      awaitingAutoVerificationAt: string | null;
+      expectedCommentText: string | null;
+      matchedCommentId: string | null;
+      matchedCommentText: string | null;
+      participantEmail: string | null;
+      participantName: string | null;
+      participantSessionId: string;
+      source: string | null;
+      status: string;
+      taskAttemptId: string;
+      updatedAt: string;
+      verificationCode: string;
+      verifiedAutomaticallyAt: string | null;
+    }[];
+    recentComments: {
+      commentText: string | null;
+      createdAt: string;
+      externalCommentId: string;
+      externalPostId: string | null;
+      matched: boolean;
+      participantSessionId: string | null;
+      participantVerificationCode: string | null;
+      processedAt: string | null;
+      taskAttemptId: string | null;
+    }[];
+    requiredPrefix: string;
+    requireVerificationCode: boolean;
+    taskId: string;
+    taskTitle: string;
+    unmatchedCommentCount: number;
+    verifiedAttemptCount: number;
+  };
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+
+  if (!taskDebug) {
+    return null;
+  }
+
+  return (
+    <div className="mt-4 rounded-2xl bg-white/70 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+            Instagram verification debug
+          </p>
+          <p className="mt-2 text-sm leading-6 text-slate-700">
+            Inspect recent waiting attempts, matched comments, and media wiring
+            for this Instagram comment task.
+          </p>
+        </div>
+        <button
+          className="inline-flex min-h-11 items-center justify-center rounded-full border border-[var(--color-border)] bg-white px-4 py-2 text-sm font-semibold text-slate-900 transition-colors hover:bg-slate-50"
+          onClick={() => setIsOpen((value) => !value)}
+          type="button"
+        >
+          {isOpen ? "Hide verification debug" : "Show verification debug"}
+        </button>
+      </div>
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+        <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+            Waiting attempts
+          </p>
+          <p className="mt-2 text-2xl font-semibold text-slate-950">
+            {taskDebug.pendingAttemptCount}
+          </p>
+        </div>
+        <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+            Verified attempts
+          </p>
+          <p className="mt-2 text-2xl font-semibold text-slate-950">
+            {taskDebug.verifiedAttemptCount}
+          </p>
+        </div>
+        <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+            Unmatched comments
+          </p>
+          <p className="mt-2 text-2xl font-semibold text-slate-950">
+            {taskDebug.unmatchedCommentCount}
+          </p>
+        </div>
+      </div>
+
+      {isOpen ? (
+        <div className="mt-4 space-y-4">
+          <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-4 text-sm leading-6 text-slate-700">
+            <p>
+              Connected account:{" "}
+              <span className="font-semibold text-slate-950">
+                @{taskDebug.connectedInstagramUsername ?? "unknown"}
+              </span>
+              {taskDebug.connectedInstagramAccountId
+                ? ` (${taskDebug.connectedInstagramAccountId})`
+                : ""}
+            </p>
+            <p>
+              Linked Page:{" "}
+              <code>{taskDebug.connectedPageName ?? "Not connected"}</code>
+            </p>
+            <p>
+              Instagram media ID: <code>{taskDebug.instagramMediaId}</code>
+            </p>
+            <p>
+              Required prefix: <code>{taskDebug.requiredPrefix}</code>
+            </p>
+            {taskDebug.primaryUrl ? (
+              <p>
+                Task media URL:{" "}
+                <a className="underline" href={taskDebug.primaryUrl} rel="noreferrer" target="_blank">
+                  {taskDebug.primaryUrl}
+                </a>
+              </p>
+            ) : null}
+          </div>
+
+          <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-4">
+            <p className="text-sm font-semibold text-slate-900">
+              Live Graph comments on this media
+            </p>
+            {taskDebug.liveLookupError ? (
+              <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
+                {taskDebug.liveLookupError}
+              </p>
+            ) : null}
+            {taskDebug.liveComments.length > 0 ? (
+              <ul className="mt-3 space-y-3">
+                {taskDebug.liveComments.map((comment) => (
+                  <li
+                    key={comment.commentId}
+                    className="rounded-xl bg-white px-4 py-3 text-sm leading-6 text-slate-700"
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <StatusBadge
+                        label={
+                          comment.matchingAttemptIds.length > 0
+                            ? "MATCHES ATTEMPT"
+                            : "NO MATCH"
+                        }
+                        tone={
+                          comment.matchingAttemptIds.length > 0
+                            ? "verified"
+                            : "warning"
+                        }
+                      />
+                      <span className="font-mono text-xs text-slate-500">
+                        {comment.commentId}
+                      </span>
+                    </div>
+                    <p className="mt-2">
+                      Comment text: <code>{comment.message ?? "missing message"}</code>
+                    </p>
+                    {comment.username ? <p>Username: @{comment.username}</p> : null}
+                    <p>
+                      Normalized text:{" "}
+                      <code>{comment.normalizedMessage ?? "not available"}</code>
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-3 text-sm leading-6 text-slate-700">
+                No comments were returned from the Graph API for this media.
+              </p>
+            )}
+          </div>
+
+          <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-4">
+            <p className="text-sm font-semibold text-slate-900">
+              Recent waiting and verified attempts
+            </p>
+            {taskDebug.recentAttempts.length > 0 ? (
+              <ul className="mt-3 space-y-3">
+                {taskDebug.recentAttempts.map((attempt) => (
+                  <li
+                    key={attempt.taskAttemptId}
+                    className="rounded-xl bg-white px-4 py-3 text-sm leading-6 text-slate-700"
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <StatusBadge
+                        label={attempt.status}
+                        tone={
+                          attempt.status === "VERIFIED"
+                            ? "verified"
+                            : "warning"
+                        }
+                      />
+                      <span className="font-semibold text-slate-900">
+                        {attempt.participantName ?? "Anonymous participant"}
+                      </span>
+                      <span className="text-slate-500">
+                        {attempt.verificationCode}
+                      </span>
+                    </div>
+                    <p className="mt-2">
+                      Expected comment:{" "}
+                      <code>{attempt.expectedCommentText ?? "not stored"}</code>
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-3 text-sm leading-6 text-slate-700">
+                No recent waiting or verified attempts have been recorded for
+                this task yet.
+              </p>
+            )}
+          </div>
+
+          <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-4">
+            <p className="text-sm font-semibold text-slate-900">
+              Recent webhook and comment records
+            </p>
+            {taskDebug.recentComments.length > 0 ? (
+              <ul className="mt-3 space-y-3">
+                {taskDebug.recentComments.map((comment) => (
+                  <li
+                    key={comment.externalCommentId}
+                    className="rounded-xl bg-white px-4 py-3 text-sm leading-6 text-slate-700"
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <StatusBadge
+                        label={comment.matched ? "MATCHED" : "UNMATCHED"}
+                        tone={comment.matched ? "verified" : "warning"}
+                      />
+                      <span className="font-mono text-xs text-slate-500">
+                        {comment.externalCommentId}
+                      </span>
+                    </div>
+                    <p className="mt-2">
+                      Comment text:{" "}
+                      <code>{comment.commentText ?? "missing from webhook payload"}</code>
+                    </p>
+                    <p>
+                      Media ID: <code>{comment.externalPostId ?? "unknown"}</code>
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-3 text-sm leading-6 text-slate-700">
+                No webhook/comment records have been stored for this media yet.
+              </p>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="mt-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] px-4 py-3 text-sm leading-6 text-slate-700">
+          Open this only when you need to debug why an Instagram comment task is
+          staying in the waiting state.
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SidebarSectionHeader({
   detail,
   label,
@@ -2021,7 +2712,7 @@ function TaskPaneToolbar({
   const subtitle = `${formatEnumLabel(task.type)} • ${formatTaskPointsLabel(task.points)}`;
   const autoVerifyEnabled =
     task.type === "SOCIAL_COMMENT" &&
-    task.platform === "FACEBOOK" &&
+    (task.platform === "FACEBOOK" || task.platform === "INSTAGRAM") &&
     task.configJson?.autoVerify;
   const nextActiveIntent = task.isActive ? "set-inactive" : "set-active";
   const nextActiveLabel = task.isActive ? "Set inactive" : "Set active";
@@ -2223,8 +2914,13 @@ export default function AdminEventTasks({
     event,
     facebookCommentDebug,
     facebookPostOptions,
+    instagramCommentDebug,
+    instagramConnectStatus,
+    instagramMediaOptions,
+    latestInstagramDebug,
     latestFacebookDebug,
     pendingFacebookConnection,
+    pendingInstagramConnection,
   } =
     loaderData;
   const defaultTaskAnchor =
@@ -2401,6 +3097,13 @@ export default function AdminEventTasks({
             pendingConnection={pendingFacebookConnection}
             showOauthDebugPanel={showOauthDebugPanel}
           />
+          <InstagramOnboardingCard
+            connectStatus={instagramConnectStatus}
+            connection={event.instagramConnection}
+            eventSlug={event.slug}
+            latestInstagramDebug={latestInstagramDebug}
+            pendingConnection={pendingInstagramConnection}
+          />
 
           {selectedAnchor === "task-create" ? (
             <section className="scroll-mt-6" id="task-create">
@@ -2414,6 +3117,7 @@ export default function AdminEventTasks({
                     buttonLabel="Create task"
                     eventTasks={event.tasks}
                     facebookPostOptions={facebookPostOptions}
+                    instagramMediaOptions={instagramMediaOptions}
                     intent="create"
                     key="task-create"
                   />
@@ -2431,6 +3135,7 @@ export default function AdminEventTasks({
                   buttonLabel="Save task"
                   eventTasks={event.tasks}
                   facebookPostOptions={facebookPostOptions}
+                  instagramMediaOptions={instagramMediaOptions}
                   intent="update"
                   key={selectedTask.id}
                   task={selectedTask}
@@ -2440,6 +3145,14 @@ export default function AdminEventTasks({
                 selectedTask.configJson?.autoVerify ? (
                   <FacebookCommentTaskDebugPanel
                     taskDebug={facebookCommentDebug.tasks.find(
+                      (entry) => entry.taskId === selectedTask.id,
+                    )}
+                  />
+                ) : selectedTask.type === "SOCIAL_COMMENT" &&
+                  selectedTask.platform === "INSTAGRAM" &&
+                  selectedTask.configJson?.autoVerify ? (
+                  <InstagramCommentTaskDebugPanel
+                    taskDebug={instagramCommentDebug.tasks.find(
                       (entry) => entry.taskId === selectedTask.id,
                     )}
                   />
@@ -2466,6 +3179,7 @@ export default function AdminEventTasks({
                     buttonLabel="Create task"
                     eventTasks={event.tasks}
                     facebookPostOptions={facebookPostOptions}
+                    instagramMediaOptions={instagramMediaOptions}
                     intent="create"
                     key="task-create-empty"
                   />

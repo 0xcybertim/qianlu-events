@@ -1,6 +1,8 @@
 import {
   facebookCommentTaskConfigSchema,
+  instagramCommentTaskConfigSchema,
   type FacebookCommentTaskConfig,
+  type InstagramCommentTaskConfig,
 } from "@qianlu-events/schemas";
 
 type SocialCommentTaskInput = {
@@ -9,12 +11,24 @@ type SocialCommentTaskInput = {
   type: string;
 };
 
+export type SocialCommentTaskConfig =
+  | FacebookCommentTaskConfig
+  | InstagramCommentTaskConfig;
+
+export type SupportedSocialCommentPlatform = "FACEBOOK" | "INSTAGRAM";
+
 function normalizeWhitespace(value: string) {
   return value.trim().replace(/\s+/g, " ");
 }
 
 export function normalizeCommentText(value: string) {
   return normalizeWhitespace(value).toUpperCase();
+}
+
+export function isSupportedSocialCommentPlatform(
+  platform: string,
+): platform is SupportedSocialCommentPlatform {
+  return platform === "FACEBOOK" || platform === "INSTAGRAM";
 }
 
 export function getFacebookCommentTaskConfig(
@@ -29,11 +43,45 @@ export function getFacebookCommentTaskConfig(
   return parsed.success ? parsed.data : null;
 }
 
-export function buildFacebookCommentText(args: {
+export function getInstagramCommentTaskConfig(
+  task: SocialCommentTaskInput,
+): InstagramCommentTaskConfig | null {
+  if (task.type !== "SOCIAL_COMMENT" || task.platform !== "INSTAGRAM") {
+    return null;
+  }
+
+  const parsed = instagramCommentTaskConfigSchema.safeParse(task.configJson);
+
+  return parsed.success ? parsed.data : null;
+}
+
+export function getSocialCommentTaskConfig(
+  task: SocialCommentTaskInput,
+): SocialCommentTaskConfig | null {
+  if (task.type !== "SOCIAL_COMMENT" || !isSupportedSocialCommentPlatform(task.platform)) {
+    return null;
+  }
+
+  if (task.platform === "FACEBOOK") {
+    return getFacebookCommentTaskConfig(task);
+  }
+
+  return getInstagramCommentTaskConfig(task);
+}
+
+export function getSocialCommentTargetId(config: SocialCommentTaskConfig) {
+  if ("facebookPostId" in config) {
+    return config.facebookPostId;
+  }
+
+  return config.instagramMediaId;
+}
+
+export function buildSocialCommentText(args: {
   task: SocialCommentTaskInput;
   verificationCode: string;
 }) {
-  const config = getFacebookCommentTaskConfig(args.task);
+  const config = getSocialCommentTaskConfig(args.task);
 
   if (!config) {
     return null;
@@ -48,7 +96,7 @@ export function buildFacebookCommentText(args: {
   );
 }
 
-export function matchesFacebookCommentText(args: {
+export function matchesSocialCommentText(args: {
   actualCommentText: string;
   expectedCommentText: string;
 }) {
@@ -58,7 +106,7 @@ export function matchesFacebookCommentText(args: {
   );
 }
 
-export function extractVerificationCodeFromFacebookComment(args: {
+export function extractVerificationCodeFromSocialComment(args: {
   commentText: string;
   requiredPrefix: string;
 }) {
@@ -78,4 +126,29 @@ export function extractVerificationCodeFromFacebookComment(args: {
   }
 
   return verificationCode;
+}
+
+export function isAutoVerifiableSocialCommentTask(task: SocialCommentTaskInput) {
+  return Boolean(getSocialCommentTaskConfig(task)?.autoVerify);
+}
+
+export function buildFacebookCommentText(args: {
+  task: SocialCommentTaskInput;
+  verificationCode: string;
+}) {
+  return buildSocialCommentText(args);
+}
+
+export function matchesFacebookCommentText(args: {
+  actualCommentText: string;
+  expectedCommentText: string;
+}) {
+  return matchesSocialCommentText(args);
+}
+
+export function extractVerificationCodeFromFacebookComment(args: {
+  commentText: string;
+  requiredPrefix: string;
+}) {
+  return extractVerificationCodeFromSocialComment(args);
 }

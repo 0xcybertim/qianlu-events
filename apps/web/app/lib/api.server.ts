@@ -5,6 +5,10 @@ import {
   adminFacebookCommentDebugResponseSchema,
   adminFacebookConnectionDebugSchema,
   adminFacebookPostOptionsResponseSchema,
+  adminInstagramCommentDebugResponseSchema,
+  adminInstagramConnectionDebugSchema,
+  adminInstagramMediaOptionsResponseSchema,
+  adminInstagramPendingConnectionSchema,
   adminEventsResponseSchema,
   adminFacebookPendingConnectionSchema,
   adminLeadsResponseSchema,
@@ -169,6 +173,33 @@ export async function startAdminFacebookOauth(
   };
 }
 
+export async function startAdminInstagramOauth(
+  eventSlug: string,
+  request?: Request,
+) {
+  const response = await apiRequestWithManualRedirect(
+    `/admin/events/${encodeURIComponent(eventSlug)}/instagram-oauth/start`,
+    request,
+  );
+  const location = response.headers.get("location");
+
+  if (!location) {
+    throw data(
+      {
+        message: "Instagram OAuth redirect location missing.",
+      },
+      {
+        status: 502,
+      },
+    );
+  }
+
+  return {
+    headers: forwardSetCookie(response),
+    location,
+  };
+}
+
 export async function fetchAdminSession(request?: Request) {
   const response = await apiRequest({
     path: "/admin/auth/session",
@@ -280,6 +311,49 @@ export async function fetchAdminFacebookConnectionDebug(
     .parse(await response.json());
 }
 
+export async function saveAdminInstagramConnection(
+  eventSlug: string,
+  body: unknown,
+  request?: Request,
+) {
+  const response = await apiRequest({
+    method: "POST",
+    path: `/admin/events/${encodeURIComponent(eventSlug)}/instagram-connection`,
+    body,
+    request,
+  });
+
+  return adminEventDetailSchema.parse(await response.json());
+}
+
+export async function fetchAdminInstagramPendingConnection(
+  eventSlug: string,
+  request?: Request,
+) {
+  const response = await apiRequest({
+    path: `/admin/events/${encodeURIComponent(eventSlug)}/instagram-connection/pending`,
+    request,
+  });
+
+  return adminInstagramPendingConnectionSchema
+    .nullable()
+    .parse(await response.json());
+}
+
+export async function fetchAdminInstagramConnectionDebug(
+  eventSlug: string,
+  request?: Request,
+) {
+  const response = await apiRequest({
+    path: `/admin/events/${encodeURIComponent(eventSlug)}/instagram-connection/debug`,
+    request,
+  });
+
+  return adminInstagramConnectionDebugSchema
+    .nullable()
+    .parse(await response.json());
+}
+
 export async function fetchAdminFacebookCommentDebug(
   eventSlug: string,
   request?: Request,
@@ -290,6 +364,18 @@ export async function fetchAdminFacebookCommentDebug(
   });
 
   return adminFacebookCommentDebugResponseSchema.parse(await response.json());
+}
+
+export async function fetchAdminInstagramCommentDebug(
+  eventSlug: string,
+  request?: Request,
+) {
+  const response = await apiRequest({
+    path: `/admin/events/${encodeURIComponent(eventSlug)}/instagram-comment-debug`,
+    request,
+  });
+
+  return adminInstagramCommentDebugResponseSchema.parse(await response.json());
 }
 
 export async function fetchAdminFacebookPostOptions(
@@ -304,6 +390,18 @@ export async function fetchAdminFacebookPostOptions(
   return adminFacebookPostOptionsResponseSchema.parse(await response.json());
 }
 
+export async function fetchAdminInstagramMediaOptions(
+  eventSlug: string,
+  request?: Request,
+) {
+  const response = await apiRequest({
+    path: `/admin/events/${encodeURIComponent(eventSlug)}/instagram-media-options`,
+    request,
+  });
+
+  return adminInstagramMediaOptionsResponseSchema.parse(await response.json());
+}
+
 export async function selectAdminFacebookConnection(
   eventSlug: string,
   body: unknown,
@@ -312,6 +410,21 @@ export async function selectAdminFacebookConnection(
   const response = await apiRequest({
     method: "POST",
     path: `/admin/events/${encodeURIComponent(eventSlug)}/facebook-connection/select`,
+    body,
+    request,
+  });
+
+  return adminEventDetailSchema.parse(await response.json());
+}
+
+export async function selectAdminInstagramConnection(
+  eventSlug: string,
+  body: unknown,
+  request?: Request,
+) {
+  const response = await apiRequest({
+    method: "POST",
+    path: `/admin/events/${encodeURIComponent(eventSlug)}/instagram-connection/select`,
     body,
     request,
   });

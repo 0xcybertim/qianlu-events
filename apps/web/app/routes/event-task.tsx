@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { Form, Link, redirect } from "react-router";
 import {
-  buildFacebookCommentText,
-  getFacebookCommentTaskConfig,
+  buildSocialCommentText,
+  getSocialCommentTaskConfig,
 } from "@qianlu-events/domain";
 import { Button, StatusBadge } from "@qianlu-events/ui";
 
@@ -136,13 +136,15 @@ export default function EventTask({ loaderData, params }: Route.ComponentProps) 
   const actionLinks = getTaskActionLinks(taskItem.task);
   const instructions = getTaskInstructions(taskItem.task);
   const proofHint = getTaskProofHint(taskItem.task);
-  const facebookCommentConfig = getFacebookCommentTaskConfig(taskItem.task);
-  const requiredCommentText = buildFacebookCommentText({
+  const socialCommentConfig = getSocialCommentTaskConfig(taskItem.task);
+  const requiredCommentText = buildSocialCommentText({
     task: taskItem.task,
     verificationCode: session.verificationCode,
   });
-  const isFacebookCommentTask =
-    Boolean(facebookCommentConfig?.autoVerify) && Boolean(requiredCommentText);
+  const isAutoVerifiableSocialCommentTask =
+    Boolean(socialCommentConfig?.autoVerify) && Boolean(requiredCommentText);
+  const socialPlatformLabel =
+    taskItem.task.platform === "INSTAGRAM" ? "Instagram" : "Facebook";
   const handlesInlineForm = [
     "LEAD_FORM",
     "QUIZ",
@@ -162,8 +164,8 @@ export default function EventTask({ loaderData, params }: Route.ComponentProps) 
       eyebrow="Task detail"
       title={taskLabel}
       description={
-        isFacebookCommentTask
-          ? "Open the Facebook post, leave the exact comment text shown below, then let the app wait for automatic verification."
+        isAutoVerifiableSocialCommentTask
+          ? `Open the ${socialPlatformLabel} post, leave the exact comment text shown below, then let the app wait for automatic verification.`
           : "Complete the task on this screen, submit your claim, and return to the summary when you are ready for staff verification."
       }
       style={themeStyle}
@@ -186,11 +188,11 @@ export default function EventTask({ loaderData, params }: Route.ComponentProps) 
           </p>
           <div className="mt-5 rounded-2xl bg-white/70 p-4">
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-              {isFacebookCommentTask ? "Automatic verification" : "Staff will check"}
+              {isAutoVerifiableSocialCommentTask ? "Automatic verification" : "Staff will check"}
             </p>
             <p className="mt-2 text-sm leading-6 text-slate-700">
-              {isFacebookCommentTask
-                ? "After you post the exact comment, this task waits for Facebook comment verification and updates automatically."
+              {isAutoVerifiableSocialCommentTask
+                ? `After you post the exact comment, this task waits for ${socialPlatformLabel} comment verification and updates automatically.`
                 : taskItem.task.requiresVerification
                   ? "This task needs a visible proof step before it counts for instant rewards."
                   : "This task updates your claimed score as soon as you submit it."}
@@ -335,7 +337,7 @@ export default function EventTask({ loaderData, params }: Route.ComponentProps) 
                 Open scanner
               </Link>
             </div>
-          ) : isFacebookCommentTask && facebookCommentConfig && requiredCommentText ? (
+          ) : isAutoVerifiableSocialCommentTask && socialCommentConfig && requiredCommentText ? (
             <>
               <ol className="mt-5 space-y-3 text-sm leading-6 text-slate-700">
                 {instructions.map((instruction, index) => (
@@ -352,8 +354,8 @@ export default function EventTask({ loaderData, params }: Route.ComponentProps) 
                   {requiredCommentText}
                 </p>
                 <p className="mt-3 text-sm leading-6 text-slate-700">
-                  {facebookCommentConfig.commentInstructions ??
-                    "Use this exact text so the system can match your Facebook comment to this session automatically."}
+                  {socialCommentConfig.commentInstructions ??
+                    `Use this exact text so the system can match your ${socialPlatformLabel} comment to this session automatically.`}
                 </p>
               </div>
               <div className="mt-4 flex flex-wrap gap-3">
@@ -369,10 +371,10 @@ export default function EventTask({ loaderData, params }: Route.ComponentProps) 
               </div>
               <div className="mt-4 rounded-2xl bg-white/70 p-4 text-sm leading-6 text-slate-700">
                 {taskItem.attempt?.status === "VERIFIED"
-                  ? "Your Facebook comment has been verified automatically."
+                  ? `Your ${socialPlatformLabel} comment has been verified automatically.`
                   : taskItem.attempt?.status === "PENDING_AUTO_VERIFICATION"
-                    ? "The app is waiting for your Facebook comment to arrive. Verification can take a short time."
-                    : "Once you comment and confirm here, the task will switch to waiting for Facebook comment verification."}
+                    ? `The app is waiting for your ${socialPlatformLabel} comment to arrive. Verification can take a short time.`
+                    : `Once you comment and confirm here, the task will switch to waiting for ${socialPlatformLabel} comment verification.`}
               </div>
             </>
           ) : (

@@ -5,6 +5,8 @@ import { getFacebookConfig } from "@qianlu-events/config";
 const facebookApiVersion = "v22.0";
 const facebookOAuthScopes = [
   "business_management",
+  "instagram_basic",
+  "instagram_manage_comments",
   "pages_show_list",
   "pages_read_engagement",
   "pages_read_user_content",

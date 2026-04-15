@@ -10,8 +10,8 @@ import {
 
 import { prisma } from "../lib/prisma.js";
 import {
-  awaitFacebookCommentVerification,
-  isAutoVerifiableFacebookCommentTask,
+  awaitSocialCommentVerification,
+  isAutoVerifiableSocialCommentTask,
 } from "../lib/social-comment-verification.js";
 import {
   findEventSessionByToken,
@@ -30,6 +30,7 @@ async function loadTaskForEvent(taskId: string, eventSlug: string) {
       event: {
         include: {
           facebookConnection: true,
+          instagramConnection: true,
         },
       },
     },
@@ -64,7 +65,7 @@ export function registerTaskAttemptRoutes(app: FastifyInstance) {
         };
       }
 
-      if (isAutoVerifiableFacebookCommentTask(task)) {
+      if (isAutoVerifiableSocialCommentTask(task)) {
         reply.code(400);
 
         return {
@@ -134,7 +135,7 @@ export function registerTaskAttemptRoutes(app: FastifyInstance) {
         };
       }
 
-      if (!isAutoVerifiableFacebookCommentTask(task)) {
+      if (!isAutoVerifiableSocialCommentTask(task)) {
         reply.code(400);
 
         return {
@@ -159,13 +160,14 @@ export function registerTaskAttemptRoutes(app: FastifyInstance) {
         };
       }
 
-      return awaitFacebookCommentVerification({
+      return awaitSocialCommentVerification({
         participantSessionId: session.id,
         task: {
           configJson: task.configJson,
           eventId: task.eventId,
           facebookConnection: task.event.facebookConnection,
           id: task.id,
+          instagramConnection: task.event.instagramConnection,
           platform: task.platform,
           requiresVerification: task.requiresVerification,
           title: task.title,

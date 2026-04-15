@@ -10,6 +10,10 @@ export default [
     "admin/events/:eventSlug/facebook-oauth/start",
     "routes/admin-facebook-oauth-start.ts",
   ),
+  route(
+    "admin/events/:eventSlug/instagram-oauth/start",
+    "routes/admin-instagram-oauth-start.ts",
+  ),
   route("admin/events/:eventSlug/tasks", "routes/admin-event-tasks.tsx"),
   route("admin/events/:eventSlug/qr-codes", "routes/admin-event-qr-codes.tsx"),
   route(

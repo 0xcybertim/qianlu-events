@@ -5,7 +5,11 @@ import { Prisma, type AdminRole } from "@prisma/client";
 import { ADMIN_SESSION_COOKIE_NAME } from "@qianlu-events/config";
 import {
   getFacebookCommentTaskConfig,
+  getInstagramCommentTaskConfig,
+  getSocialCommentTaskConfig,
+  getSocialCommentTargetId,
   matchesFacebookCommentText,
+  matchesSocialCommentText,
   normalizeCommentText,
 } from "@qianlu-events/domain";
 import {
@@ -14,11 +18,14 @@ import {
   adminEventCreateBodySchema,
   adminFacebookConnectionUpsertBodySchema,
   adminEventUpdateBodySchema,
+  adminInstagramConnectionSelectBodySchema,
+  adminInstagramConnectionUpsertBodySchema,
   adminQrCodeCreateBodySchema,
   adminTaskCreateBodyWithFacebookSourceSchema,
   adminTaskUpdateBodySchema,
   eventSettingsSchema,
   facebookCommentTaskConfigSchema,
+  instagramCommentTaskConfigSchema,
   type TaskAttemptStatus,
 } from "@qianlu-events/schemas";
 import { z } from "zod";
@@ -36,6 +43,12 @@ import {
   fetchFacebookGrantedPermissions,
   fetchFacebookManagedPages,
 } from "../lib/facebook.js";
+import {
+  fetchInstagramAccountMedia,
+  fetchInstagramMediaComments,
+  fetchInstagramProfessionalAccounts,
+  subscribeInstagramAccountToWebhooks,
+} from "../lib/instagram.js";
 import { prisma } from "../lib/prisma.js";
 
 const leadTaskTypes = [
@@ -43,6 +56,26 @@ const leadTaskTypes = [
   "NEWSLETTER_OPT_IN",
   "WHATSAPP_OPT_IN",
 ] as const;
+
+function parseSocialCommentTaskConfig(task: {
+  configJson?: Prisma.JsonValue | null;
+  platform: string;
+  type: string;
+}) {
+  if (task.type !== "SOCIAL_COMMENT") {
+    return null;
+  }
+
+  if (task.platform === "FACEBOOK") {
+    return facebookCommentTaskConfigSchema.parse(task.configJson ?? null);
+  }
+
+  if (task.platform === "INSTAGRAM") {
+    return instagramCommentTaskConfigSchema.parse(task.configJson ?? null);
+  }
+
+  return null;
+}
 
 const taskAttemptStatuses: TaskAttemptStatus[] = [
   "NOT_STARTED",
@@ -69,6 +102,7 @@ type AdminAccountForRequest = {
 type AdminEventWithTasks = Prisma.EventGetPayload<{
   include: {
     facebookConnection: true;
+    instagramConnection: true;
     tasks: true;
   };
 }>;
@@ -193,6 +227,7 @@ async function requireEventAccess(args: {
         },
       },
       facebookConnection: true,
+      instagramConnection: true,
       tasks: {
         orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
       },
@@ -418,10 +453,7 @@ function toTaskCreateData(
   eventId: string,
   body: z.infer<typeof adminTaskCreateBodyWithFacebookSourceSchema>,
 ) {
-  const facebookCommentConfig =
-    body.type === "SOCIAL_COMMENT" && body.platform === "FACEBOOK"
-      ? facebookCommentTaskConfigSchema.parse(body.configJson ?? null)
-      : null;
+  const socialCommentConfig = parseSocialCommentTaskConfig(body);
 
   return {
     eventId,
@@ -432,29 +464,26 @@ function toTaskCreateData(
     points: body.points,
     sortOrder: body.sortOrder,
     isActive: body.isActive,
-    requiresVerification: facebookCommentConfig ? true : body.requiresVerification,
-    verificationType: facebookCommentConfig ? "AUTOMATIC" : body.verificationType,
-    configJson: (facebookCommentConfig ?? body.configJson) ?? Prisma.JsonNull,
+    requiresVerification: socialCommentConfig ? true : body.requiresVerification,
+    verificationType: socialCommentConfig ? "AUTOMATIC" : body.verificationType,
+    configJson: (socialCommentConfig ?? body.configJson) ?? Prisma.JsonNull,
   } satisfies Prisma.TaskUncheckedCreateInput;
 }
 
 function toComparableTaskDefinitionForCreate(
   body: z.infer<typeof adminTaskCreateBodyWithFacebookSourceSchema>,
 ): ComparableTaskDefinition {
-  const facebookCommentConfig =
-    body.type === "SOCIAL_COMMENT" && body.platform === "FACEBOOK"
-      ? facebookCommentTaskConfigSchema.parse(body.configJson ?? null)
-      : null;
+  const socialCommentConfig = parseSocialCommentTaskConfig(body);
 
   return {
-    configJson: (facebookCommentConfig ?? body.configJson) ?? null,
+    configJson: (socialCommentConfig ?? body.configJson) ?? null,
     description: body.description.trim(),
     platform: body.platform,
     points: body.points,
-    requiresVerification: facebookCommentConfig ? true : body.requiresVerification,
+    requiresVerification: socialCommentConfig ? true : body.requiresVerification,
     title: body.title.trim(),
     type: body.type,
-    verificationType: facebookCommentConfig ? "AUTOMATIC" : body.verificationType,
+    verificationType: socialCommentConfig ? "AUTOMATIC" : body.verificationType,
   };
 }
 
@@ -468,13 +497,11 @@ function toTaskUpdateData(args: {
 }) {
   const { body, currentTask } = args;
   const data: Prisma.TaskUpdateInput = {};
-  const facebookCommentConfig =
-    (body.type ?? currentTask.type) === "SOCIAL_COMMENT" &&
-    (body.platform ?? currentTask.platform) === "FACEBOOK"
-      ? facebookCommentTaskConfigSchema.parse(
-          body.configJson ?? currentTask.configJson ?? null,
-        )
-      : null;
+  const socialCommentConfig = parseSocialCommentTaskConfig({
+    configJson: body.configJson ?? currentTask.configJson ?? null,
+    platform: body.platform ?? currentTask.platform,
+    type: body.type ?? currentTask.type,
+  });
 
   if (body.title !== undefined) data.title = body.title;
   if (body.description !== undefined) data.description = body.description;
@@ -484,21 +511,21 @@ function toTaskUpdateData(args: {
   if (body.sortOrder !== undefined) data.sortOrder = body.sortOrder;
   if (body.isActive !== undefined) data.isActive = body.isActive;
   if (body.requiresVerification !== undefined) {
-    data.requiresVerification = facebookCommentConfig ? true : body.requiresVerification;
+    data.requiresVerification = socialCommentConfig ? true : body.requiresVerification;
   }
   if (body.verificationType !== undefined) {
-    data.verificationType = facebookCommentConfig
+    data.verificationType = socialCommentConfig
       ? "AUTOMATIC"
       : body.verificationType;
   }
   if (body.configJson !== undefined) {
     data.configJson =
-      (facebookCommentConfig ?? body.configJson) ?? Prisma.JsonNull;
-  } else if (facebookCommentConfig) {
-    data.configJson = facebookCommentConfig;
+      (socialCommentConfig ?? body.configJson) ?? Prisma.JsonNull;
+  } else if (socialCommentConfig) {
+    data.configJson = socialCommentConfig;
   }
-  if (facebookCommentConfig) data.requiresVerification = true;
-  if (facebookCommentConfig) data.verificationType = "AUTOMATIC";
+  if (socialCommentConfig) data.requiresVerification = true;
+  if (socialCommentConfig) data.verificationType = "AUTOMATIC";
 
   return data;
 }
@@ -528,20 +555,21 @@ function toComparableTaskDefinitionForUpdate(args: {
     type: body.type ?? currentTask.type,
     verificationType: body.verificationType ?? currentTask.verificationType,
   };
-  const facebookCommentConfig =
-    merged.type === "SOCIAL_COMMENT" && merged.platform === "FACEBOOK"
-      ? facebookCommentTaskConfigSchema.parse(merged.configJson ?? null)
-      : null;
+  const socialCommentConfig = parseSocialCommentTaskConfig({
+    configJson: merged.configJson ?? null,
+    platform: merged.platform,
+    type: merged.type,
+  });
 
   return {
-    configJson: (facebookCommentConfig ?? merged.configJson) ?? null,
+    configJson: (socialCommentConfig ?? merged.configJson) ?? null,
     description: merged.description.trim(),
     platform: merged.platform,
     points: merged.points,
-    requiresVerification: facebookCommentConfig ? true : merged.requiresVerification,
+    requiresVerification: socialCommentConfig ? true : merged.requiresVerification,
     title: merged.title.trim(),
     type: merged.type,
-    verificationType: facebookCommentConfig ? "AUTOMATIC" : merged.verificationType,
+    verificationType: socialCommentConfig ? "AUTOMATIC" : merged.verificationType,
   } satisfies ComparableTaskDefinition;
 }
 
@@ -659,7 +687,7 @@ async function findTaskWithDuplicateCommentPrefix(args: {
   taskPlatform: string;
   taskType: string;
 }) {
-  const candidateConfig = getFacebookCommentTaskConfig({
+  const candidateConfig = getSocialCommentTaskConfig({
     configJson: args.taskConfig,
     platform: args.taskPlatform,
     type: args.taskType,
@@ -695,7 +723,7 @@ async function findTaskWithDuplicateCommentPrefix(args: {
 
   return (
     tasks.find((task) => {
-      const taskConfig = getFacebookCommentTaskConfig(task);
+      const taskConfig = getSocialCommentTaskConfig(task);
 
       if (!taskConfig) {
         return false;
@@ -754,6 +782,22 @@ async function serializeAdminEventDetail(event: AdminEventWithTasks | null) {
               ? event.facebookConnection.pageAccessToken.slice(-6)
               : "set",
           updatedAt: event.facebookConnection.updatedAt.toISOString(),
+        }
+      : null,
+    instagramConnection: event.instagramConnection
+      ? {
+          pageId: event.instagramConnection.pageId,
+          pageName: event.instagramConnection.pageName,
+          instagramAccountId: event.instagramConnection.instagramAccountId,
+          instagramUsername: event.instagramConnection.instagramUsername,
+          hasAccessToken: event.instagramConnection.accessToken.length > 0,
+          tokenHint:
+            event.instagramConnection.accessToken.length >= 6
+              ? event.instagramConnection.accessToken.slice(-6)
+              : "set",
+          tokenExpiresAt:
+            event.instagramConnection.tokenExpiresAt?.toISOString() ?? null,
+          updatedAt: event.instagramConnection.updatedAt.toISOString(),
         }
       : null,
   };
@@ -839,6 +883,33 @@ const facebookOauthStoredDebugSchema = z.object({
   droppedPages: z.array(facebookOauthDroppedPageSchema).default([]),
 });
 
+const instagramPendingAccountOptionSchema = z.object({
+  accessToken: z.string().min(1),
+  instagramAccountId: z.string(),
+  instagramUsername: z.string().nullable(),
+  pageId: z.string(),
+  pageName: z.string(),
+});
+
+const instagramOauthStoredDebugSchema = z.object({
+  rawPages: z
+    .array(
+      z.object({
+        error: z.string().nullable(),
+        hasInstagramAccount: z.boolean().default(false),
+        hasPageAccessToken: z.boolean().default(false),
+        instagramAccountId: z.string().nullable(),
+        instagramUsername: z.string().nullable(),
+        pageId: z.string().nullable(),
+        pageName: z.string().nullable(),
+        tokenHint: z.string().nullable(),
+      }),
+    )
+    .default([]),
+  usableAccounts: z.array(instagramPendingAccountOptionSchema).default([]),
+  warnings: z.array(z.string()).default([]),
+});
+
 function getApiBaseUrl() {
   return (
     process.env.API_BASE_URL?.trim() ||
@@ -855,9 +926,14 @@ function getFacebookOAuthRedirectUri() {
   return `${getApiBaseUrl()}/admin/integrations/facebook/callback`;
 }
 
+function getInstagramOAuthRedirectUri() {
+  return `${getApiBaseUrl()}/admin/integrations/instagram/callback`;
+}
+
 function buildAdminEventTasksUrl(
   eventSlug: string,
   facebookConnect?: string,
+  instagramConnect?: string,
 ) {
   const url = new URL(
     `/admin/events/${encodeURIComponent(eventSlug)}/tasks`,
@@ -866,6 +942,10 @@ function buildAdminEventTasksUrl(
 
   if (facebookConnect) {
     url.searchParams.set("facebookConnect", facebookConnect);
+  }
+
+  if (instagramConnect) {
+    url.searchParams.set("instagramConnect", instagramConnect);
   }
 
   return url.toString();
@@ -893,6 +973,20 @@ function parseFacebookOauthStoredDebug(value: Prisma.JsonValue | null) {
   };
 }
 
+function parseInstagramOauthStoredDebug(value: Prisma.JsonValue | null) {
+  const result = instagramOauthStoredDebugSchema.safeParse(value);
+
+  if (result.success) {
+    return result.data;
+  }
+
+  return {
+    rawPages: [],
+    usableAccounts: [],
+    warnings: [],
+  };
+}
+
 function serializePendingFacebookConnection(
   state: {
     expiresAt: Date;
@@ -913,6 +1007,35 @@ function serializePendingFacebookConnection(
     pages: pages.map((page) => ({
       pageId: page.pageId,
       pageName: page.pageName,
+    })),
+    expiresAt: state.expiresAt.toISOString(),
+  };
+}
+
+function serializePendingInstagramConnection(
+  state: {
+    accountOptionsJson: Prisma.JsonValue | null;
+    expiresAt: Date;
+  } | null,
+) {
+  if (!state) {
+    return null;
+  }
+
+  const accounts = parseInstagramOauthStoredDebug(
+    state.accountOptionsJson,
+  ).usableAccounts;
+
+  if (accounts.length === 0) {
+    return null;
+  }
+
+  return {
+    accounts: accounts.map((account) => ({
+      instagramAccountId: account.instagramAccountId,
+      instagramUsername: account.instagramUsername,
+      pageId: account.pageId,
+      pageName: account.pageName,
     })),
     expiresAt: state.expiresAt.toISOString(),
   };
@@ -947,10 +1070,49 @@ function serializeFacebookOauthDebugState(
   };
 }
 
+function serializeInstagramOauthDebugState(
+  state: {
+    accountOptionsJson: Prisma.JsonValue | null;
+    consumedAt: Date | null;
+    createdAt: Date;
+    expiresAt: Date;
+    state: string;
+  } | null,
+) {
+  if (!state) {
+    return null;
+  }
+
+  const parsed = parseInstagramOauthStoredDebug(state.accountOptionsJson);
+
+  return {
+    accounts: parsed.usableAccounts.map((account) => ({
+      instagramAccountId: account.instagramAccountId,
+      instagramUsername: account.instagramUsername,
+      pageId: account.pageId,
+      pageName: account.pageName,
+    })),
+    consumedAt: state.consumedAt?.toISOString() ?? null,
+    createdAt: state.createdAt.toISOString(),
+    expiresAt: state.expiresAt.toISOString(),
+    rawPages: parsed.rawPages,
+    state: state.state,
+    warnings: parsed.warnings,
+  };
+}
+
 async function loadLatestUsableFacebookPagesForEvent(eventId: string) {
   const state = await findLatestFacebookOauthStateForEvent(eventId);
 
   return parseFacebookOauthStoredDebug(state?.pageOptionsJson ?? null).usablePages;
+}
+
+async function loadLatestUsableInstagramAccountsForEvent(eventId: string) {
+  const state = await findLatestInstagramOauthStateForEvent(eventId);
+
+  return parseInstagramOauthStoredDebug(
+    state?.accountOptionsJson ?? null,
+  ).usableAccounts;
 }
 
 async function syncEventFacebookConnectionFromSelection(args: {
@@ -986,6 +1148,52 @@ async function syncEventFacebookConnectionFromSelection(args: {
   });
 }
 
+async function syncEventInstagramConnectionFromSelection(args: {
+  eventId: string;
+  instagramAccountId?: string | null;
+}) {
+  if (!args.instagramAccountId) {
+    return;
+  }
+
+  const usableAccounts = await loadLatestUsableInstagramAccountsForEvent(args.eventId);
+  const selectedAccount = usableAccounts.find(
+    (account) => account.instagramAccountId === args.instagramAccountId,
+  );
+
+  if (!selectedAccount) {
+    throw new Error(
+      "Selected Instagram professional account is no longer available from the latest OAuth session.",
+    );
+  }
+
+  await prisma.eventInstagramConnection.upsert({
+    where: {
+      eventId: args.eventId,
+    },
+    update: {
+      accessToken: selectedAccount.accessToken,
+      instagramAccountId: selectedAccount.instagramAccountId,
+      instagramUsername: selectedAccount.instagramUsername,
+      pageId: selectedAccount.pageId,
+      pageName: selectedAccount.pageName,
+      tokenExpiresAt: null,
+    },
+    create: {
+      accessToken: selectedAccount.accessToken,
+      eventId: args.eventId,
+      instagramAccountId: selectedAccount.instagramAccountId,
+      instagramUsername: selectedAccount.instagramUsername,
+      pageId: selectedAccount.pageId,
+      pageName: selectedAccount.pageName,
+    },
+  });
+
+  await subscribeInstagramAccountToWebhooks(selectedAccount.accessToken, [
+    "comments",
+  ]);
+}
+
 async function findPendingFacebookOauthState(args: {
   adminAccountId: string;
   eventId: string;
@@ -1007,6 +1215,36 @@ async function findPendingFacebookOauthState(args: {
 
 async function findLatestFacebookOauthStateForEvent(eventId: string) {
   return prisma.adminFacebookOAuthState.findFirst({
+    where: {
+      eventId,
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+  });
+}
+
+async function findPendingInstagramOauthState(args: {
+  adminAccountId: string;
+  eventId: string;
+}) {
+  return prisma.adminInstagramOAuthState.findFirst({
+    where: {
+      adminAccountId: args.adminAccountId,
+      consumedAt: null,
+      eventId: args.eventId,
+      expiresAt: {
+        gt: new Date(),
+      },
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+  });
+}
+
+async function findLatestInstagramOauthStateForEvent(eventId: string) {
+  return prisma.adminInstagramOAuthState.findFirst({
     where: {
       eventId,
     },
@@ -1288,6 +1526,7 @@ export function registerAdminRoutes(app: FastifyInstance) {
       },
       include: {
         facebookConnection: true,
+        instagramConnection: true,
         tasks: true,
       },
     });
@@ -1335,6 +1574,7 @@ export function registerAdminRoutes(app: FastifyInstance) {
         data: body,
         include: {
           facebookConnection: true,
+          instagramConnection: true,
           tasks: {
             orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
           },
@@ -1698,6 +1938,243 @@ export function registerAdminRoutes(app: FastifyInstance) {
 
   app.get<{
     Params: { eventSlug: string };
+  }>("/admin/events/:eventSlug/instagram-comment-debug", async (request, reply) => {
+    const access = await requireEventAccess({
+      eventSlug: request.params.eventSlug,
+      minRole: "VIEWER",
+      reply,
+      request,
+    });
+
+    if (!access || "message" in access) {
+      return access ?? { tasks: [] };
+    }
+
+    const instagramTasks = access.event.tasks
+      .map((task) => ({
+        config: getInstagramCommentTaskConfig(task),
+        task,
+      }))
+      .filter(
+        (
+          entry,
+        ): entry is {
+          config: NonNullable<ReturnType<typeof getInstagramCommentTaskConfig>>;
+          task: (typeof access.event.tasks)[number];
+        } =>
+          Boolean(
+            entry.config &&
+              entry.task.type === "SOCIAL_COMMENT" &&
+              entry.task.platform === "INSTAGRAM" &&
+              entry.config.autoVerify,
+          ),
+      );
+
+    const tasks = await Promise.all(
+      instagramTasks.map(async ({ config, task }) => {
+        const [
+          pendingAttemptCount,
+          verifiedAttemptCount,
+          unmatchedCommentCount,
+          recentAttempts,
+          recentComments,
+        ] = await Promise.all([
+          prisma.taskAttempt.count({
+            where: {
+              status: "PENDING_AUTO_VERIFICATION",
+              taskId: task.id,
+            },
+          }),
+          prisma.taskAttempt.count({
+            where: {
+              status: "VERIFIED",
+              taskId: task.id,
+            },
+          }),
+          prisma.socialCommentVerification.count({
+            where: {
+              externalPostId: config.instagramMediaId,
+              matched: false,
+              platform: "INSTAGRAM",
+            },
+          }),
+          prisma.taskAttempt.findMany({
+            where: {
+              taskId: task.id,
+              status: {
+                in: ["PENDING_AUTO_VERIFICATION", "VERIFIED"],
+              },
+            },
+            include: {
+              participantSession: {
+                select: {
+                  email: true,
+                  id: true,
+                  name: true,
+                  verificationCode: true,
+                },
+              },
+            },
+            orderBy: {
+              updatedAt: "desc",
+            },
+            take: 10,
+          }),
+          prisma.socialCommentVerification.findMany({
+            where: {
+              platform: "INSTAGRAM",
+              OR: [
+                {
+                  externalPostId: config.instagramMediaId,
+                },
+                {
+                  taskId: task.id,
+                },
+              ],
+            },
+            include: {
+              participantSession: {
+                select: {
+                  verificationCode: true,
+                },
+              },
+            },
+            orderBy: {
+              createdAt: "desc",
+            },
+            take: 10,
+          }),
+        ]);
+        let liveComments: Awaited<ReturnType<typeof fetchInstagramMediaComments>> = [];
+        let liveLookupError: string | null = null;
+
+        if (access.event.instagramConnection?.accessToken) {
+          try {
+            liveComments = await fetchInstagramMediaComments(
+              config.instagramMediaId,
+              access.event.instagramConnection.accessToken,
+            );
+          } catch (error) {
+            liveLookupError =
+              error instanceof Error
+                ? error.message
+                : "Could not fetch Instagram comments for this media.";
+          }
+        } else {
+          liveLookupError =
+            "No connected Instagram access token is available for this event.";
+        }
+
+        return {
+          autoVerify: config.autoVerify,
+          connectedInstagramAccountId:
+            access.event.instagramConnection?.instagramAccountId ?? null,
+          connectedInstagramUsername:
+            access.event.instagramConnection?.instagramUsername ?? null,
+          connectedPageId: access.event.instagramConnection?.pageId ?? null,
+          connectedPageName: access.event.instagramConnection?.pageName ?? null,
+          instagramMediaId: config.instagramMediaId,
+          liveCommentCount: liveComments.length,
+          liveComments: liveComments.map((comment) => {
+            const matchingAttempts = recentAttempts.filter((attempt) => {
+              const expectedCommentText = getProofString(
+                attempt.proofJson,
+                "expectedCommentText",
+              );
+
+              return Boolean(
+                comment.text &&
+                  expectedCommentText &&
+                  matchesSocialCommentText({
+                    actualCommentText: comment.text,
+                    expectedCommentText,
+                  }),
+              );
+            });
+
+            return {
+              commentId: comment.id,
+              createdAt: comment.timestamp ?? null,
+              matchingAttemptIds: matchingAttempts.map((attempt) => attempt.id),
+              matchingExpectedCommentTexts: matchingAttempts
+                .map((attempt) =>
+                  getProofString(attempt.proofJson, "expectedCommentText"),
+                )
+                .filter((value): value is string => Boolean(value)),
+              matchingVerificationCodes: matchingAttempts.map(
+                (attempt) => attempt.participantSession.verificationCode,
+              ),
+              message: comment.text ?? null,
+              normalizedMessage:
+                typeof comment.text === "string"
+                  ? normalizeCommentText(comment.text)
+                  : null,
+              parentId: comment.parent_id ?? null,
+              username: comment.username ?? null,
+            };
+          }),
+          liveLookupError,
+          pendingAttemptCount,
+          primaryUrl: config.primaryUrl ?? null,
+          recentAttempts: recentAttempts.map((attempt) => ({
+            awaitingAutoVerificationAt: getProofString(
+              attempt.proofJson,
+              "awaitingAutoVerificationAt",
+            ),
+            expectedCommentText: getProofString(
+              attempt.proofJson,
+              "expectedCommentText",
+            ),
+            matchedCommentId: getProofString(
+              attempt.proofJson,
+              "matchedCommentId",
+            ),
+            matchedCommentText: getProofString(
+              attempt.proofJson,
+              "matchedCommentText",
+            ),
+            participantEmail: attempt.participantSession.email,
+            participantName: attempt.participantSession.name,
+            participantSessionId: attempt.participantSession.id,
+            source: getProofString(attempt.proofJson, "source"),
+            status: attempt.status,
+            taskAttemptId: attempt.id,
+            updatedAt: attempt.updatedAt.toISOString(),
+            verificationCode: attempt.participantSession.verificationCode,
+            verifiedAutomaticallyAt: getProofString(
+              attempt.proofJson,
+              "verifiedAutomaticallyAt",
+            ),
+          })),
+          recentComments: recentComments.map((comment) => ({
+            commentText: comment.commentText,
+            createdAt: comment.createdAt.toISOString(),
+            externalCommentId: comment.externalCommentId,
+            externalPostId: comment.externalPostId,
+            matched: comment.matched,
+            participantSessionId: comment.participantSessionId,
+            participantVerificationCode:
+              comment.participantSession?.verificationCode ?? null,
+            processedAt: serializeDate(comment.processedAt),
+            taskAttemptId: comment.taskAttemptId,
+          })),
+          requiredPrefix: config.requiredPrefix,
+          requireVerificationCode: config.requireVerificationCode,
+          taskId: task.id,
+          taskTitle: task.title,
+          unmatchedCommentCount,
+          verifiedAttemptCount,
+        };
+      }),
+    );
+
+    return {
+      tasks,
+    };
+  });
+
+  app.get<{
+    Params: { eventSlug: string };
   }>("/admin/events/:eventSlug/facebook-post-options", async (request, reply) => {
     const access = await requireEventAccess({
       eventSlug: request.params.eventSlug,
@@ -1773,6 +2250,85 @@ export function registerAdminRoutes(app: FastifyInstance) {
     }
   });
 
+  app.get<{
+    Params: { eventSlug: string };
+  }>("/admin/events/:eventSlug/instagram-media-options", async (request, reply) => {
+    const access = await requireEventAccess({
+      eventSlug: request.params.eventSlug,
+      minRole: "VIEWER",
+      reply,
+      request,
+    });
+
+    if (!access || "message" in access) {
+      return access ?? { account: null, error: null, media: [] };
+    }
+
+    if (!access.event.instagramConnection?.accessToken) {
+      return {
+        account: access.event.instagramConnection
+          ? {
+              instagramAccountId: access.event.instagramConnection.instagramAccountId,
+              instagramUsername: access.event.instagramConnection.instagramUsername,
+              pageId: access.event.instagramConnection.pageId,
+              pageName: access.event.instagramConnection.pageName,
+            }
+          : null,
+        error:
+          "Run Instagram connect once before selecting a professional account and media.",
+        media: [],
+      };
+    }
+
+    try {
+      const media = await fetchInstagramAccountMedia(
+        access.event.instagramConnection.instagramAccountId,
+        access.event.instagramConnection.accessToken,
+      );
+
+      return {
+        account: {
+          instagramAccountId: access.event.instagramConnection.instagramAccountId,
+          instagramUsername: access.event.instagramConnection.instagramUsername,
+          pageId: access.event.instagramConnection.pageId,
+          pageName: access.event.instagramConnection.pageName,
+        },
+        error: null,
+        media: media.map((item) => ({
+          captionPreview:
+            (item.caption ?? "").trim().slice(0, 140) || `Instagram media ${item.id}`,
+          mediaId: item.id,
+          mediaType: item.media_type ?? null,
+          permalink: item.permalink ?? null,
+          timestamp: item.timestamp ?? null,
+        })),
+      };
+    } catch (error) {
+      request.log.warn(
+        {
+          error,
+          eventId: access.event.id,
+          instagramAccountId: access.event.instagramConnection.instagramAccountId,
+        },
+        "Could not load Instagram media options for admin task form.",
+      );
+
+      return {
+        account: {
+          instagramAccountId: access.event.instagramConnection.instagramAccountId,
+          instagramUsername: access.event.instagramConnection.instagramUsername,
+          pageId: access.event.instagramConnection.pageId,
+          pageName: access.event.instagramConnection.pageName,
+        },
+        error:
+          error instanceof Error
+            ? error.message
+            : "Could not load recent Instagram media for the connected account.",
+        media: [],
+      };
+    }
+  });
+
   app.post<{ Params: { eventSlug: string } }>(
     "/admin/events/:eventSlug/facebook-connection/select",
     async (request, reply) => {
@@ -1844,6 +2400,7 @@ export function registerAdminRoutes(app: FastifyInstance) {
         where: { id: access.event.id },
         include: {
           facebookConnection: true,
+          instagramConnection: true,
           tasks: {
             orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
           },
@@ -1908,6 +2465,7 @@ export function registerAdminRoutes(app: FastifyInstance) {
         where: { id: access.event.id },
         include: {
           facebookConnection: true,
+          instagramConnection: true,
           tasks: {
             orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
           },
@@ -2155,6 +2713,481 @@ export function registerAdminRoutes(app: FastifyInstance) {
     }
   });
 
+  app.get<{ Params: { eventSlug: string } }>(
+    "/admin/events/:eventSlug/instagram-oauth/start",
+    async (request, reply) => {
+      const access = await requireEventAccess({
+        eventSlug: request.params.eventSlug,
+        minRole: "EDITOR",
+        reply,
+        request,
+      });
+
+      if (!access || "message" in access) {
+        return access ?? { message: "Admin authentication required." };
+      }
+
+      const state = createAdminSessionToken();
+
+      await prisma.adminInstagramOAuthState.updateMany({
+        where: {
+          adminAccountId: access.account.id,
+          consumedAt: null,
+          eventId: access.event.id,
+        },
+        data: {
+          consumedAt: new Date(),
+        },
+      });
+
+      await prisma.adminInstagramOAuthState.create({
+        data: {
+          adminAccountId: access.account.id,
+          eventId: access.event.id,
+          expiresAt: new Date(Date.now() + 1000 * 60 * 15),
+          state,
+        },
+      });
+
+      try {
+        return reply.redirect(
+          buildFacebookOAuthUrl({
+            redirectUri: getInstagramOAuthRedirectUri(),
+            state,
+          }),
+        );
+      } catch (error) {
+        request.log.error({ error }, "Could not start Instagram OAuth flow.");
+        reply.code(400);
+
+        return {
+          message: "Meta OAuth is not configured on the server.",
+        };
+      }
+    },
+  );
+
+  app.get<{
+    Params: { eventSlug: string };
+  }>("/admin/events/:eventSlug/instagram-connection/pending", async (request, reply) => {
+    const access = await requireEventAccess({
+      eventSlug: request.params.eventSlug,
+      minRole: "EDITOR",
+      reply,
+      request,
+    });
+
+    if (!access || "message" in access) {
+      return access ?? { message: "Admin authentication required." };
+    }
+
+    const state = await findPendingInstagramOauthState({
+      adminAccountId: access.account.id,
+      eventId: access.event.id,
+    });
+
+    return serializePendingInstagramConnection(state);
+  });
+
+  app.get<{
+    Params: { eventSlug: string };
+  }>("/admin/events/:eventSlug/instagram-connection/debug", async (request, reply) => {
+    const access = await requireEventAccess({
+      eventSlug: request.params.eventSlug,
+      minRole: "EDITOR",
+      reply,
+      request,
+    });
+
+    if (!access || "message" in access) {
+      return access ?? { message: "Admin authentication required." };
+    }
+
+    return serializeInstagramOauthDebugState(
+      await findLatestInstagramOauthStateForEvent(access.event.id),
+    );
+  });
+
+  app.post<{ Params: { eventSlug: string } }>(
+    "/admin/events/:eventSlug/instagram-connection/select",
+    async (request, reply) => {
+      const access = await requireEventAccess({
+        eventSlug: request.params.eventSlug,
+        minRole: "EDITOR",
+        reply,
+        request,
+      });
+
+      if (!access || "message" in access) {
+        return access ?? { message: "Admin authentication required." };
+      }
+
+      const body = adminInstagramConnectionSelectBodySchema.parse(request.body);
+      const state = await findPendingInstagramOauthState({
+        adminAccountId: access.account.id,
+        eventId: access.event.id,
+      });
+
+      if (!state) {
+        reply.code(404);
+
+        return {
+          message:
+            "No pending Instagram professional account selection was found for this event.",
+        };
+      }
+
+      const selectedAccount = parseInstagramOauthStoredDebug(
+        state.accountOptionsJson,
+      ).usableAccounts.find(
+        (account) => account.instagramAccountId === body.instagramAccountId,
+      );
+
+      if (!selectedAccount) {
+        reply.code(400);
+
+        return {
+          message:
+            "The selected Instagram professional account is no longer available.",
+        };
+      }
+
+      await prisma.$transaction([
+        prisma.eventInstagramConnection.upsert({
+          where: {
+            eventId: access.event.id,
+          },
+          update: {
+            accessToken: selectedAccount.accessToken,
+            instagramAccountId: selectedAccount.instagramAccountId,
+            instagramUsername: selectedAccount.instagramUsername,
+            pageId: selectedAccount.pageId,
+            pageName: selectedAccount.pageName,
+            tokenExpiresAt: null,
+          },
+          create: {
+            accessToken: selectedAccount.accessToken,
+            eventId: access.event.id,
+            instagramAccountId: selectedAccount.instagramAccountId,
+            instagramUsername: selectedAccount.instagramUsername,
+            pageId: selectedAccount.pageId,
+            pageName: selectedAccount.pageName,
+          },
+        }),
+        prisma.adminInstagramOAuthState.update({
+          where: {
+            id: state.id,
+          },
+          data: {
+            consumedAt: new Date(),
+          },
+        }),
+      ]);
+
+      try {
+        await subscribeInstagramAccountToWebhooks(selectedAccount.accessToken, [
+          "comments",
+        ]);
+      } catch (error) {
+        request.log.warn(
+          {
+            error: error instanceof Error ? error.message : String(error),
+            eventId: access.event.id,
+            instagramAccountId: selectedAccount.instagramAccountId,
+          },
+          "Could not subscribe Instagram account to webhook comments field.",
+        );
+      }
+
+      const event = await prisma.event.findUnique({
+        where: { id: access.event.id },
+        include: {
+          facebookConnection: true,
+          instagramConnection: true,
+          tasks: {
+            orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+          },
+        },
+      });
+
+      return serializeAdminEventDetail(event);
+    },
+  );
+
+  app.post<{ Params: { eventSlug: string } }>(
+    "/admin/events/:eventSlug/instagram-connection",
+    async (request, reply) => {
+      const access = await requireEventAccess({
+        eventSlug: request.params.eventSlug,
+        minRole: "EDITOR",
+        reply,
+        request,
+      });
+
+      if (!access || "message" in access) {
+        return access ?? { message: "Admin authentication required." };
+      }
+
+      const body = adminInstagramConnectionUpsertBodySchema.parse(request.body);
+      const existingConnection = await prisma.eventInstagramConnection.findUnique({
+        where: {
+          eventId: access.event.id,
+        },
+      });
+
+      if (!existingConnection && !body.accessToken) {
+        reply.code(400);
+
+        return {
+          message:
+            "An access token is required the first time you connect an Instagram professional account.",
+        };
+      }
+
+      await prisma.eventInstagramConnection.upsert({
+        where: {
+          eventId: access.event.id,
+        },
+        update: {
+          accessToken: body.accessToken ?? existingConnection?.accessToken ?? "",
+          instagramAccountId: body.instagramAccountId,
+          instagramUsername: body.instagramUsername ?? null,
+          pageId: body.pageId,
+          pageName: body.pageName ?? null,
+          tokenExpiresAt: body.tokenExpiresAt ? new Date(body.tokenExpiresAt) : null,
+        },
+        create: {
+          accessToken: body.accessToken ?? "",
+          eventId: access.event.id,
+          instagramAccountId: body.instagramAccountId,
+          instagramUsername: body.instagramUsername ?? null,
+          pageId: body.pageId,
+          pageName: body.pageName ?? null,
+          tokenExpiresAt: body.tokenExpiresAt ? new Date(body.tokenExpiresAt) : null,
+        },
+      });
+
+      if (body.accessToken) {
+        try {
+          await subscribeInstagramAccountToWebhooks(body.accessToken, [
+            "comments",
+          ]);
+        } catch (error) {
+          request.log.warn(
+            {
+              error: error instanceof Error ? error.message : String(error),
+              eventId: access.event.id,
+              instagramAccountId: body.instagramAccountId,
+            },
+            "Could not subscribe manual Instagram connection to webhook comments field.",
+          );
+        }
+      }
+
+      const event = await prisma.event.findUnique({
+        where: { id: access.event.id },
+        include: {
+          facebookConnection: true,
+          instagramConnection: true,
+          tasks: {
+            orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+          },
+        },
+      });
+
+      return serializeAdminEventDetail(event);
+    },
+  );
+
+  app.get<{
+    Querystring: {
+      code?: string;
+      error?: string;
+      error_description?: string;
+      state?: string;
+    };
+  }>("/admin/integrations/instagram/callback", async (request, reply) => {
+    const stateValue = request.query.state;
+    const oauthState = stateValue
+      ? await prisma.adminInstagramOAuthState.findUnique({
+          where: {
+            state: stateValue,
+          },
+          include: {
+            event: true,
+          },
+        })
+      : null;
+
+    const fallbackUrl = oauthState
+      ? buildAdminEventTasksUrl(oauthState.event.slug, undefined, "connect-failed")
+      : new URL("/admin/events", getWebBaseUrl()).toString();
+
+    if (
+      !oauthState ||
+      oauthState.consumedAt ||
+      oauthState.expiresAt <= new Date()
+    ) {
+      return reply.redirect(fallbackUrl);
+    }
+
+    if (request.query.error || !request.query.code) {
+      await prisma.adminInstagramOAuthState.update({
+        where: {
+          id: oauthState.id,
+        },
+        data: {
+          consumedAt: new Date(),
+        },
+      });
+
+      return reply.redirect(
+        buildAdminEventTasksUrl(
+          oauthState.event.slug,
+          undefined,
+          "oauth-denied",
+        ),
+      );
+    }
+
+    try {
+      const userAccessToken = await exchangeFacebookCodeForUserAccessToken({
+        code: request.query.code,
+        redirectUri: getInstagramOAuthRedirectUri(),
+      });
+      const {
+        rawPages,
+        usableAccounts,
+        warnings,
+      } = await fetchInstagramProfessionalAccounts(userAccessToken);
+
+      await prisma.adminInstagramOAuthState.update({
+        where: {
+          id: oauthState.id,
+        },
+        data: {
+          accountOptionsJson: {
+            rawPages,
+            usableAccounts,
+            warnings,
+          } satisfies Prisma.InputJsonValue,
+        },
+      });
+
+      if (usableAccounts.length === 0) {
+        await prisma.adminInstagramOAuthState.update({
+          where: {
+            id: oauthState.id,
+          },
+          data: {
+            consumedAt: new Date(),
+          },
+        });
+
+        return reply.redirect(
+          buildAdminEventTasksUrl(
+            oauthState.event.slug,
+            undefined,
+            "no-accounts",
+          ),
+        );
+      }
+
+      if (usableAccounts.length === 1) {
+        const selectedAccount = usableAccounts[0];
+
+        await prisma.$transaction([
+          prisma.eventInstagramConnection.upsert({
+            where: {
+              eventId: oauthState.eventId,
+            },
+            update: {
+              accessToken: selectedAccount.accessToken,
+              instagramAccountId: selectedAccount.instagramAccountId,
+              instagramUsername: selectedAccount.instagramUsername,
+              pageId: selectedAccount.pageId,
+              pageName: selectedAccount.pageName,
+              tokenExpiresAt: null,
+            },
+            create: {
+              accessToken: selectedAccount.accessToken,
+              eventId: oauthState.eventId,
+              instagramAccountId: selectedAccount.instagramAccountId,
+              instagramUsername: selectedAccount.instagramUsername,
+              pageId: selectedAccount.pageId,
+              pageName: selectedAccount.pageName,
+            },
+          }),
+          prisma.adminInstagramOAuthState.update({
+            where: {
+              id: oauthState.id,
+            },
+            data: {
+              consumedAt: new Date(),
+            },
+          }),
+        ]);
+
+        try {
+          await subscribeInstagramAccountToWebhooks(selectedAccount.accessToken, [
+            "comments",
+          ]);
+        } catch (error) {
+          request.log.warn(
+            {
+              error: error instanceof Error ? error.message : String(error),
+              eventId: oauthState.eventId,
+              instagramAccountId: selectedAccount.instagramAccountId,
+            },
+            "Could not subscribe Instagram account after OAuth callback.",
+          );
+        }
+
+        return reply.redirect(
+          buildAdminEventTasksUrl(
+            oauthState.event.slug,
+            undefined,
+            "connected",
+          ),
+        );
+      }
+
+      return reply.redirect(
+        buildAdminEventTasksUrl(
+          oauthState.event.slug,
+          undefined,
+          "select-account",
+        ),
+      );
+    } catch (error) {
+      request.log.error(
+        {
+          error: error instanceof Error ? error.message : String(error),
+          eventId: oauthState.eventId,
+          state: stateValue ?? null,
+        },
+        "Instagram OAuth callback failed.",
+      );
+
+      await prisma.adminInstagramOAuthState.update({
+        where: {
+          id: oauthState.id,
+        },
+        data: {
+          consumedAt: new Date(),
+        },
+      });
+
+      return reply.redirect(
+        buildAdminEventTasksUrl(
+          oauthState.event.slug,
+          undefined,
+          "connect-failed",
+        ),
+      );
+    }
+  });
+
   app.post<{ Params: { eventSlug: string } }>(
     "/admin/events/:eventSlug/tasks",
     async (request, reply) => {
@@ -2191,6 +3224,13 @@ export function registerAdminRoutes(app: FastifyInstance) {
         await syncEventFacebookConnectionFromSelection({
           eventId: access.event.id,
           pageId: body.facebookSourcePageId ?? null,
+        });
+      }
+
+      if (body.type === "SOCIAL_COMMENT" && body.platform === "INSTAGRAM") {
+        await syncEventInstagramConnectionFromSelection({
+          eventId: access.event.id,
+          instagramAccountId: body.instagramSourceAccountId ?? null,
         });
       }
 
@@ -2277,6 +3317,16 @@ export function registerAdminRoutes(app: FastifyInstance) {
         await syncEventFacebookConnectionFromSelection({
           eventId: access.event.id,
           pageId: body.facebookSourcePageId ?? null,
+        });
+      }
+
+      if (
+        mergedType === "SOCIAL_COMMENT" &&
+        mergedPlatform === "INSTAGRAM"
+      ) {
+        await syncEventInstagramConnectionFromSelection({
+          eventId: access.event.id,
+          instagramAccountId: body.instagramSourceAccountId ?? null,
         });
       }
 

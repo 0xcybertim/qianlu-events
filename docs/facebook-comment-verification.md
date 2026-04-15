@@ -1,6 +1,7 @@
 # Facebook Comment Verification
 
-This is the first automatic social verification flow in the Qianlu Events app.
+Facebook comment verification now runs on the shared social comment
+auto-verification pipeline that also powers Instagram.
 
 ## How it works
 
@@ -97,7 +98,8 @@ event. Task-level Facebook post settings still live in the task config itself.
 
 ## Current limitations
 
-- The first version only supports Facebook Page comment tasks.
+- This document only covers the Facebook Page provider. Instagram has its own
+  provider-specific setup and limits.
 - The fallback Graph lookup reads comments for one configured Facebook post at a time.
 - Matching currently assumes a single verification code token after the configured prefix.
 - Local development can simulate webhook delivery, but real end-to-end verification still requires a properly configured Meta app, Page subscription, and access token.

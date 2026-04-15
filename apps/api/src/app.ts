@@ -6,6 +6,7 @@ import { registerAdminRoutes } from "./routes/admin.js";
 import { registerEventRoutes } from "./routes/events.js";
 import { registerFacebookRoutes } from "./routes/facebook.js";
 import { registerHealthRoutes } from "./routes/health.js";
+import { registerInstagramRoutes } from "./routes/instagram.js";
 import { registerQrScanRoutes } from "./routes/qr-scans.js";
 import { registerSessionRoutes } from "./routes/sessions.js";
 import { registerStaffRoutes } from "./routes/staff.js";
@@ -51,6 +52,7 @@ export function createApp() {
 
   registerHealthRoutes(app);
   registerFacebookRoutes(app);
+  registerInstagramRoutes(app);
   registerEventRoutes(app);
   registerSessionRoutes(app);
   registerQrScanRoutes(app);
