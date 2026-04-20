@@ -9,14 +9,16 @@ const sections = [
     body: [
       "Qianlu Events is an event engagement platform that lets organizers configure event tasks, collect participant submissions, and verify eligible actions such as Facebook comment tasks.",
       "Organizers can connect a Facebook Page to an event so the platform can match Facebook comment events to participant verification codes and mark tasks as verified automatically.",
+      "With participant consent, Qianlu Events can also load Google Analytics for internal product reporting and Meta Pixel for event-specific marketing measurement.",
     ],
   },
   {
     title: "Information We Process",
     body: [
       "For organizer accounts, we process account details, event access roles, connected Facebook Page IDs, Facebook Page names, and Facebook Page access tokens stored server-side.",
-      "For participant sessions, we process event participation records such as verification codes, optional names and emails, task attempts, proof metadata, verified points, and reward eligibility.",
+      "For participant sessions and optional participant accounts, we process event participation records such as verification codes, optional names and emails, task attempts, proof metadata, verified points, reward eligibility, and one-time login link records.",
       "For Facebook verification, we process webhook payloads, matched Facebook comment IDs, Facebook post IDs, comment text used for verification, and audit metadata showing how the verification was performed.",
+      "When participants accept analytics cookies, we also process basic usage and page interaction analytics through Google Analytics and, when configured for an event, Meta Pixel.",
     ],
   },
   {
@@ -24,6 +26,7 @@ const sections = [
     body: [
       "We use organizer and participant data to operate event tasks, validate submissions, prevent duplicate or fraudulent rewards, calculate reward eligibility, and support organizer reporting.",
       "We use Facebook Page data only to connect an event to the selected Page, receive comment verification events, and verify the configured Facebook comment task for that event.",
+      "We use consented analytics data to understand participant flow through the event experience, monitor product performance, and improve event setup and reporting.",
     ],
   },
   {
@@ -55,7 +58,7 @@ export function meta({}: Route.MetaArgs) {
     {
       name: "description",
       content:
-        "Privacy policy for Qianlu Events, including organizer Facebook Page connections and participant task verification.",
+        "Privacy policy for Qianlu Events, including organizer Facebook Page connections, participant task verification, and consented analytics tracking.",
     },
   ];
 }
@@ -65,7 +68,7 @@ export default function PrivacyPage() {
     <ScreenShell
       eyebrow="Legal"
       title="Privacy Policy"
-      description="This page explains how Qianlu Events processes organizer, participant, and Facebook integration data."
+      description="This page explains how Qianlu Events processes organizer, participant, Facebook integration, and consented analytics data."
       width="wide"
     >
       <div className="space-y-4">

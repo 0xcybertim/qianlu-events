@@ -6,6 +6,7 @@ export default [
   route("admin", "routes/admin.tsx"),
   route("admin/events", "routes/admin-events.tsx"),
   route("admin/events/:eventSlug", "routes/admin-event.tsx"),
+  route("admin/events/:eventSlug/marketing", "routes/admin-event-marketing.tsx"),
   route(
     "admin/events/:eventSlug/facebook-oauth/start",
     "routes/admin-facebook-oauth-start.ts",
@@ -26,6 +27,8 @@ export default [
   route(":eventSlug", "routes/event-landing.tsx"),
   route(":eventSlug/tasks", "routes/event-tasks.tsx"),
   route(":eventSlug/tasks/:taskId", "routes/event-task.tsx"),
+  route(":eventSlug/account", "routes/event-account.tsx"),
+  route(":eventSlug/account/verify", "routes/event-account-verify.ts"),
   route(":eventSlug/scan", "routes/event-scan-camera.tsx"),
   route(":eventSlug/scan/:token", "routes/event-scan.tsx"),
   route(":eventSlug/summary", "routes/event-summary.tsx"),

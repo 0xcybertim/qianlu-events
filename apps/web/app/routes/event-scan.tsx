@@ -173,6 +173,22 @@ export default function EventScan({ loaderData, params }: Route.ComponentProps) 
       eyebrow={copy.eyebrow}
       title={copy.title}
       description={copy.description}
+      marketing={{
+        analytics: {
+          claimed_points_total: loaderData.result.session.claimedPoints,
+          points_awarded: loaderData.result.pointsAwarded,
+          qr_status: loaderData.result.status,
+          verified_points_total: loaderData.result.session.verifiedPoints,
+        },
+        eventName: loaderData.experience.event.name,
+        eventSlug: loaderData.experience.event.slug,
+        page: "scan-result",
+        pointsAwarded: loaderData.result.pointsAwarded,
+        qrStatus: loaderData.result.status,
+        qrToken: params.token,
+        sessionKey: loaderData.result.session.verificationCode,
+        settings: loaderData.experience.event.settingsJson,
+      }}
       style={themeStyle}
     >
       <div className="space-y-4">
@@ -205,10 +221,24 @@ export default function EventScan({ loaderData, params }: Route.ComponentProps) 
         </div>
 
         <div className="flex flex-col gap-3">
-          <Link className="action-link action-link-primary" to={`/${params.eventSlug}/tasks`}>
+          <Link
+            className="action-link action-link-primary"
+            data-analytics-cta-name="back_to_tasks"
+            data-analytics-event="scan_result_navigation_click"
+            data-analytics-location="footer"
+            data-analytics-scan-status={loaderData.result.status}
+            to={`/${params.eventSlug}/tasks`}
+          >
             Back to tasks
           </Link>
-          <Link className="action-link action-link-secondary" to={`/${params.eventSlug}/summary`}>
+          <Link
+            className="action-link action-link-secondary"
+            data-analytics-cta-name="show_summary"
+            data-analytics-event="scan_result_navigation_click"
+            data-analytics-location="footer"
+            data-analytics-scan-status={loaderData.result.status}
+            to={`/${params.eventSlug}/summary`}
+          >
             Show summary
           </Link>
         </div>

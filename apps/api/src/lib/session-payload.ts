@@ -20,6 +20,9 @@ type SerializableRewardEligibility = {
 type SerializableParticipantSession = {
   id: string;
   eventId: string;
+  participantAccount?: {
+    accountUuid: string;
+  } | null;
   verificationCode: string;
   email?: string | null;
   name?: string | null;
@@ -38,6 +41,7 @@ export function serializeParticipantSessionForClient(
   return participantSessionSchema.parse({
     id: session.id,
     eventId: session.eventId,
+    participantAccountUuid: session.participantAccount?.accountUuid ?? null,
     verificationCode: session.verificationCode,
     email: session.email,
     name: session.name,

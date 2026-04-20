@@ -4,6 +4,7 @@ import type { Route } from "./+types/event-landing";
 import { fetchExperience } from "../lib/api.server";
 import { getBrandingStyle } from "../lib/branding";
 import { getRewardTiers } from "../lib/experience";
+import { summarizeAnalyticsCounts } from "../lib/marketing";
 import { ScreenShell } from "../components/screen-shell";
 
 function humanizeSlug(slug: string) {
@@ -27,12 +28,35 @@ export default function EventLanding({ loaderData, params }: Route.ComponentProp
   const eventName = loaderData.event.name || humanizeSlug(params.eventSlug);
   const rewardTiers = getRewardTiers(loaderData);
   const themeStyle = getBrandingStyle(loaderData);
+  const rewardTypeSummary = summarizeAnalyticsCounts(
+    loaderData.event.settingsJson?.rewardTypes ?? [],
+  );
+  const taskTypeSummary = summarizeAnalyticsCounts(
+    loaderData.event.tasks.map((task) => task.type),
+  );
+  const taskPlatformSummary = summarizeAnalyticsCounts(
+    loaderData.event.tasks.map((task) => task.platform),
+  );
 
   return (
     <ScreenShell
       eyebrow="Scan. Complete. Show. Win."
       title={eventName}
       description="Visitors complete social and lead tasks, collect points, and show this experience to staff for reward verification."
+      marketing={{
+        analytics: {
+          has_session: Boolean(loaderData.session),
+          reward_tier_count: rewardTiers.length,
+          reward_type_summary: rewardTypeSummary || null,
+          task_platform_summary: taskPlatformSummary || null,
+          task_type_summary: taskTypeSummary || null,
+          total_tasks: loaderData.event.tasks.length,
+        },
+        eventName,
+        eventSlug: loaderData.event.slug,
+        page: "landing",
+        settings: loaderData.event.settingsJson,
+      }}
       style={themeStyle}
     >
       <div className="space-y-4">
@@ -79,13 +103,31 @@ export default function EventLanding({ loaderData, params }: Route.ComponentProp
             </div>
           </div>
           <div className="mt-6 flex flex-col gap-3">
-            <Link className="action-link action-link-primary" to={`/${params.eventSlug}/tasks`}>
+            <Link
+              className="action-link action-link-primary"
+              data-analytics-cta-name="start_tasks"
+              data-analytics-event="landing_cta_click"
+              data-analytics-location="hero"
+              to={`/${params.eventSlug}/tasks`}
+            >
               Start tasks
             </Link>
-            <Link className="action-link action-link-secondary" to={`/${params.eventSlug}/scan`}>
+            <Link
+              className="action-link action-link-secondary"
+              data-analytics-cta-name="scan_stamp_qr"
+              data-analytics-event="landing_cta_click"
+              data-analytics-location="hero"
+              to={`/${params.eventSlug}/scan`}
+            >
               Scan stamp QR
             </Link>
-            <Link className="action-link action-link-secondary" to={`/${params.eventSlug}/summary`}>
+            <Link
+              className="action-link action-link-secondary"
+              data-analytics-cta-name="preview_summary"
+              data-analytics-event="landing_cta_click"
+              data-analytics-location="hero"
+              to={`/${params.eventSlug}/summary`}
+            >
               Preview summary screen
             </Link>
           </div>

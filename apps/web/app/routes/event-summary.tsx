@@ -5,6 +5,7 @@ import type { Route } from "./+types/event-summary";
 import { fetchExperience } from "../lib/api.server";
 import { getBrandingStyle } from "../lib/branding";
 import { mapTaskAttempts } from "../lib/experience";
+import { summarizeAnalyticsCounts } from "../lib/marketing";
 import { ScreenShell } from "../components/screen-shell";
 
 function formatVerificationCode(code: string) {
@@ -24,7 +25,8 @@ export default function EventSummary({ loaderData, params }: Route.ComponentProp
     });
   }
 
-  const summaryRows = mapTaskAttempts(loaderData).slice(0, 6);
+  const allRows = mapTaskAttempts(loaderData);
+  const summaryRows = allRows.slice(0, 6);
   const themeStyle = getBrandingStyle(loaderData);
   const needsReviewCount = summaryRows.filter((row) =>
     [
@@ -39,12 +41,50 @@ export default function EventSummary({ loaderData, params }: Route.ComponentProp
   const verifiedCount = summaryRows.filter(
     (row) => row.attempt?.status === "VERIFIED",
   ).length;
+  const verifiedTaskIds = mapTaskAttempts(loaderData)
+    .filter((row) => row.attempt?.status === "VERIFIED")
+    .map((row) => row.task.id);
+  const allNeedsReviewCount = allRows.filter((row) =>
+    [
+      "COMPLETED_BY_USER",
+      "PENDING_STAFF_CHECK",
+      "PENDING_AUTO_VERIFICATION",
+    ].includes(row.attempt?.status ?? ""),
+  ).length;
+  const allRejectedCount = allRows.filter(
+    (row) => row.attempt?.status === "REJECTED",
+  ).length;
+  const allVerifiedCount = allRows.filter(
+    (row) => row.attempt?.status === "VERIFIED",
+  ).length;
+  const taskStatusSummary = summarizeAnalyticsCounts(
+    allRows.map((row) => row.attempt?.status ?? "NOT_STARTED"),
+  );
 
   return (
     <ScreenShell
       eyebrow="Verification summary"
       title="Show this screen to staff"
       description="This is the participant-facing checkpoint where staff can quickly verify social actions, lead tasks, and booth proofs."
+      marketing={{
+        analytics: {
+          claimed_points: session.claimedPoints,
+          daily_draw_eligible: session.dailyDrawEligible,
+          reward_tier: session.rewardTier ?? null,
+          task_status_summary: taskStatusSummary || null,
+          total_tasks: allRows.length,
+          verification_pending_count: allNeedsReviewCount,
+          verification_rejected_count: allRejectedCount,
+          verification_verified_count: allVerifiedCount,
+          verified_points: session.verifiedPoints,
+        },
+        eventName: loaderData.event.name,
+        eventSlug: loaderData.event.slug,
+        page: "summary",
+        sessionKey: session.verificationCode,
+        settings: loaderData.event.settingsJson,
+        verifiedTaskIds,
+      }}
       style={themeStyle}
     >
       <div className="space-y-4">
@@ -142,7 +182,22 @@ export default function EventSummary({ loaderData, params }: Route.ComponentProp
         </div>
 
         <div className="flex flex-col gap-3">
-          <Link className="action-link action-link-secondary" to={`/${params.eventSlug}/tasks`}>
+          <Link
+            className="action-link action-link-secondary"
+            data-analytics-cta-name="account_from_summary"
+            data-analytics-event="summary_navigation_click"
+            data-analytics-location="footer"
+            to={`/${params.eventSlug}/account`}
+          >
+            {session.participantAccountUuid ? "Account connected" : "Save progress with email"}
+          </Link>
+          <Link
+            className="action-link action-link-secondary"
+            data-analytics-cta-name="back_to_task_list"
+            data-analytics-event="summary_navigation_click"
+            data-analytics-location="footer"
+            to={`/${params.eventSlug}/tasks`}
+          >
             Back to task list
           </Link>
         </div>

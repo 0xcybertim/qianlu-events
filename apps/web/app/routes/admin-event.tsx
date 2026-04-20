@@ -3,6 +3,7 @@ import { Form, Link, redirect } from "react-router";
 
 import type { Route } from "./+types/admin-event";
 import { fetchAdminEvent, updateAdminEvent } from "../lib/api.server";
+import { getParticipantContactBannerText } from "../lib/experience";
 import {
   AdminCard,
   AdminField,
@@ -44,6 +45,24 @@ function parseRewardTiers(formData: FormData) {
     .filter((tier) => tier.key && tier.label && Number.isFinite(tier.threshold));
 }
 
+function parseParticipantMessaging(formData: FormData) {
+  const saveProgressMessage =
+    formData.get("saveProgressMessage")?.toString().trim() ?? "";
+  const prizeDrawLabel = formData.get("prizeDrawLabel")?.toString().trim() ?? "";
+  const laterPrizeLabel =
+    formData.get("laterPrizeLabel")?.toString().trim() ?? "";
+
+  if (!saveProgressMessage && !prizeDrawLabel && !laterPrizeLabel) {
+    return undefined;
+  }
+
+  return {
+    ...(saveProgressMessage ? { saveProgressMessage } : {}),
+    ...(prizeDrawLabel ? { prizeDrawLabel } : {}),
+    ...(laterPrizeLabel ? { laterPrizeLabel } : {}),
+  };
+}
+
 export async function loader({ params, request }: Route.LoaderArgs) {
   try {
     return fetchAdminEvent(params.eventSlug, request);
@@ -62,6 +81,8 @@ export async function action({ params, request }: Route.ActionArgs) {
   );
 
   try {
+    const currentEvent = await fetchAdminEvent(params.eventSlug, request);
+
     await updateAdminEvent(
       params.eventSlug,
       {
@@ -69,10 +90,12 @@ export async function action({ params, request }: Route.ActionArgs) {
         status: formData.get("status")?.toString() ?? "DRAFT",
         brandingJson,
         settingsJson: {
+          marketing: currentEvent.settingsJson?.marketing,
           rewardTypes: formData
             .getAll("rewardTypes")
             .map((value) => value.toString()),
           rewardTiers: parseRewardTiers(formData),
+          participantMessaging: parseParticipantMessaging(formData),
         },
       },
       request,
@@ -95,11 +118,13 @@ export default function AdminEvent({
   const event = loaderData;
   const branding = event.brandingJson;
   const settings = event.settingsJson;
+  const participantMessaging = settings?.participantMessaging;
   const tiers = [...(settings?.rewardTiers ?? []), {
     key: "",
     label: "",
     threshold: 0,
   }];
+  const participantBannerPreview = getParticipantContactBannerText(settings);
 
   return (
     <AdminShell
@@ -252,6 +277,46 @@ export default function AdminEvent({
               ))}
             </fieldset>
 
+            <fieldset className="space-y-3">
+              <legend className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-600">
+                Participant reward messaging
+              </legend>
+              <p className="text-sm leading-6 text-slate-600">
+                Leave these blank to use automatic defaults based on the reward
+                types above.
+              </p>
+              <div className="rounded-lg bg-white/70 px-3 py-3 text-sm text-slate-700">
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                  Current top bar preview
+                </p>
+                <p className="mt-2">{participantBannerPreview}</p>
+              </div>
+              <AdminField label="Full banner message override">
+                <input
+                  className={adminInputClass}
+                  defaultValue={participantMessaging?.saveProgressMessage ?? ""}
+                  name="saveProgressMessage"
+                  placeholder="Add your email so you can save your progress and hear about prizes later."
+                />
+              </AdminField>
+              <AdminField label="Prize draw label override">
+                <input
+                  className={adminInputClass}
+                  defaultValue={participantMessaging?.prizeDrawLabel ?? ""}
+                  name="prizeDrawLabel"
+                  placeholder="weekend prize draw"
+                />
+              </AdminField>
+              <AdminField label="Later prize label override">
+                <input
+                  className={adminInputClass}
+                  defaultValue={participantMessaging?.laterPrizeLabel ?? ""}
+                  name="laterPrizeLabel"
+                  placeholder="festival prizes"
+                />
+              </AdminField>
+            </fieldset>
+
             {actionData && "error" in actionData ? (
               <p className="text-sm font-medium text-rose-700">
                 {actionData.error}
@@ -269,4 +334,3 @@ export default function AdminEvent({
     </AdminShell>
   );
 }
-

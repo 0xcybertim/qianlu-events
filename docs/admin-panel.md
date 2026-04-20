@@ -10,6 +10,7 @@ Organizer routes live under `/admin`:
 - `/admin`
 - `/admin/events`
 - `/admin/events/:eventSlug`
+- `/admin/events/:eventSlug/marketing`
 - `/admin/events/:eventSlug/tasks`
 - `/admin/events/:eventSlug/qr-codes`
 - `/admin/events/:eventSlug/participants`
@@ -55,6 +56,12 @@ The event overview supports:
 - branding colors
 - enabled reward types
 - reward tier keys, labels, and thresholds
+- participant reward/contact messaging with automatic defaults and optional overrides
+
+The marketing page supports:
+
+- up to two event-level Meta Pixel IDs
+- participant-only tracking after explicit cookie consent
 
 The task page supports:
 

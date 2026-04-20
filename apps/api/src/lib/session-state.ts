@@ -9,6 +9,11 @@ async function loadSessionContext(sessionId: string) {
   const session = await prisma.participantSession.findUnique({
     where: { id: sessionId },
     include: {
+      participantAccount: {
+        select: {
+          accountUuid: true,
+        },
+      },
       event: {
         include: {
           tasks: {
@@ -140,6 +145,11 @@ export async function recalculateSessionState(sessionId: string) {
   const updatedSession = await prisma.participantSession.findUniqueOrThrow({
     where: { id: session.id },
     include: {
+      participantAccount: {
+        select: {
+          accountUuid: true,
+        },
+      },
       taskAttempts: true,
       rewardEligibility: true,
     },
@@ -164,6 +174,11 @@ export async function findEventSessionByToken(args: {
       },
     },
     include: {
+      participantAccount: {
+        select: {
+          accountUuid: true,
+        },
+      },
       taskAttempts: true,
       rewardEligibility: true,
       event: {

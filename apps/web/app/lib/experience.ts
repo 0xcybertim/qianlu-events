@@ -1,11 +1,94 @@
 import type {
+  EventSettings,
   ExperienceResponse,
+  ParticipantMessaging,
+  RewardType,
   RewardTier,
   TaskAttemptStatus,
 } from "@qianlu-events/schemas";
 
 export function getRewardTiers(experience: ExperienceResponse): RewardTier[] {
   return experience.event.settingsJson?.rewardTiers ?? [];
+}
+
+export function getRewardTypes(experience: ExperienceResponse): RewardType[] {
+  return experience.event.settingsJson?.rewardTypes ?? [];
+}
+
+export function getParticipantMessaging(
+  experience: ExperienceResponse,
+): ParticipantMessaging | undefined {
+  return experience.event.settingsJson?.participantMessaging;
+}
+
+function cleanLabel(value: string | undefined) {
+  const trimmed = value?.trim();
+
+  return trimmed ? trimmed : null;
+}
+
+export function getParticipantContactBannerText(
+  settings: EventSettings | null | undefined,
+) {
+  const configuredMessage = cleanLabel(settings?.participantMessaging?.saveProgressMessage);
+
+  if (configuredMessage) {
+    return configuredMessage;
+  }
+
+  const rewardTypes = settings?.rewardTypes ?? [];
+  const drawLabel =
+    cleanLabel(settings?.participantMessaging?.prizeDrawLabel) ??
+    (rewardTypes.includes("DAILY_PRIZE_DRAW") ? "prize draws" : null);
+  const laterPrizeLabel =
+    cleanLabel(settings?.participantMessaging?.laterPrizeLabel) ??
+    (rewardTypes.includes("TIERED_REWARD") ? "later prizes" : null);
+
+  if (drawLabel && laterPrizeLabel) {
+    return `Add your email to save your progress and hear about ${drawLabel} or ${laterPrizeLabel}.`;
+  }
+
+  if (drawLabel) {
+    return `Add your email to save your progress and hear about ${drawLabel}.`;
+  }
+
+  if (laterPrizeLabel) {
+    return `Add your email to save your progress and hear about ${laterPrizeLabel}.`;
+  }
+
+  return "Add your email to save your progress.";
+}
+
+export function getParticipantContactReasonText(
+  settings: EventSettings | null | undefined,
+) {
+  const configuredMessage = cleanLabel(settings?.participantMessaging?.saveProgressMessage);
+
+  if (configuredMessage) {
+    return configuredMessage;
+  }
+
+  const rewardTypes = settings?.rewardTypes ?? [];
+  const drawLabel =
+    cleanLabel(settings?.participantMessaging?.prizeDrawLabel) ??
+    (rewardTypes.includes("DAILY_PRIZE_DRAW") ? "prize draws" : null);
+  const laterPrizeLabel =
+    cleanLabel(settings?.participantMessaging?.laterPrizeLabel) ??
+    (rewardTypes.includes("TIERED_REWARD") ? "later prizes" : null);
+
+  if (drawLabel && laterPrizeLabel) {
+    return `save your progress and hear about ${drawLabel} or ${laterPrizeLabel}`;
+  }
+
+  if (drawLabel) {
+    return `save your progress and hear about ${drawLabel}`;
+  }
+
+  if (laterPrizeLabel) {
+    return `save your progress and hear about ${laterPrizeLabel}`;
+  }
+
+  return "save your progress";
 }
 
 export function getStatusMeta(status: TaskAttemptStatus) {

@@ -6,6 +6,7 @@ import { BrowserQRCodeReader, type IScannerControls } from "@zxing/browser";
 import type { Route } from "./+types/event-scan-camera";
 import { fetchExperience } from "../lib/api.server";
 import { getBrandingStyle } from "../lib/branding";
+import { trackParticipantAnalyticsEvent } from "../lib/marketing";
 import { ScreenShell } from "../components/screen-shell";
 
 type ScannerState = "idle" | "starting" | "scanning" | "found" | "error";
@@ -148,6 +149,13 @@ export default function EventScanCamera({
     }
 
     if (!window.isSecureContext && !isLocalHost(window.location.hostname)) {
+      trackParticipantAnalyticsEvent({
+        googleEventName: "scan_camera_start_failed",
+        params: {
+          error_name: "InsecureContext",
+          reason: "insecure_context",
+        },
+      });
       setScannerState("error");
       setMessage(
         "Camera scanning needs HTTPS. Open the deployed event URL to scan from your phone.",
@@ -166,6 +174,13 @@ export default function EventScanCamera({
     }
 
     if (!navigator.mediaDevices?.getUserMedia) {
+      trackParticipantAnalyticsEvent({
+        googleEventName: "scan_camera_start_failed",
+        params: {
+          error_name: "NotSupported",
+          reason: "get_user_media_missing",
+        },
+      });
       setScannerState("error");
       setMessage("This browser does not support camera scanning.");
       setErrorDetail(
@@ -192,6 +207,12 @@ export default function EventScanCamera({
     setScannerState("starting");
     setMessage("Starting camera...");
     setErrorDetail(null);
+    trackParticipantAnalyticsEvent({
+      googleEventName: "scan_camera_start_requested",
+      params: {
+        scanner_state: "starting",
+      },
+    });
 
     try {
       const reader = new BrowserQRCodeReader(undefined, {
@@ -224,6 +245,12 @@ export default function EventScanCamera({
           if (!target) {
             activeControls.stop();
             controlsRef.current = null;
+            trackParticipantAnalyticsEvent({
+              googleEventName: "scan_camera_invalid_qr",
+              params: {
+                scanner_state: "error",
+              },
+            });
             setScannerState("error");
             setMessage("That QR code is not a stamp QR code for this app.");
             setErrorDetail(`Scanned value: ${result.getText()}`);
@@ -233,6 +260,12 @@ export default function EventScanCamera({
           didNavigateRef.current = true;
           setScannerState("found");
           setMessage("Stamp found. Checking it now...");
+          trackParticipantAnalyticsEvent({
+            googleEventName: "scan_camera_qr_detected",
+            params: {
+              scanner_state: "found",
+            },
+          });
           activeControls.stop();
           controlsRef.current = null;
           void navigate(target);
@@ -242,12 +275,25 @@ export default function EventScanCamera({
       controlsRef.current = controls;
       setScannerState("scanning");
       setMessage("Point the camera at a stamp QR code.");
+      trackParticipantAnalyticsEvent({
+        googleEventName: "scan_camera_started",
+        params: {
+          scanner_state: "scanning",
+        },
+      });
     } catch (error) {
       controlsRef.current?.stop();
       controlsRef.current = null;
       setScannerState("error");
       setMessage(getCameraErrorMessage(error));
       setErrorDetail(await buildCameraErrorDetail(error));
+      trackParticipantAnalyticsEvent({
+        googleEventName: "scan_camera_start_failed",
+        params: {
+          error_name: getErrorName(error),
+          reason: "browser_error",
+        },
+      });
     }
   }
 
@@ -257,6 +303,12 @@ export default function EventScanCamera({
     setScannerState("idle");
     setMessage("Camera stopped. Start it again when you are ready.");
     setErrorDetail(null);
+    trackParticipantAnalyticsEvent({
+      googleEventName: "scan_camera_stopped",
+      params: {
+        scanner_state: "idle",
+      },
+    });
   }
 
   const isCameraActive =
@@ -267,6 +319,16 @@ export default function EventScanCamera({
       eyebrow="Scan stamp"
       title="Scan a stamp QR code"
       description="Use this camera scanner when you find a stamp point at the event."
+      marketing={{
+        analytics: {
+          has_session: Boolean(loaderData.session),
+        },
+        eventName: loaderData.event.name,
+        eventSlug: loaderData.event.slug,
+        page: "scan-camera",
+        sessionKey: loaderData.session?.verificationCode ?? null,
+        settings: loaderData.event.settingsJson,
+      }}
       style={themeStyle}
     >
       <div className="space-y-4">
@@ -299,11 +361,21 @@ export default function EventScanCamera({
 
           <div className="mt-4 flex flex-col gap-3">
             {isCameraActive ? (
-              <Button tone="secondary" onClick={stopScanner}>
+              <Button
+                data-analytics-event="scan_camera_stop_click"
+                data-analytics-location="scanner_controls"
+                tone="secondary"
+                onClick={stopScanner}
+              >
                 Stop camera
               </Button>
             ) : (
-              <Button disabled={scannerState === "found"} onClick={startScanner}>
+              <Button
+                data-analytics-event="scan_camera_start_click"
+                data-analytics-location="scanner_controls"
+                disabled={scannerState === "found"}
+                onClick={startScanner}
+              >
                 Start camera
               </Button>
             )}
@@ -311,7 +383,13 @@ export default function EventScanCamera({
         </div>
 
         <div className="flex flex-col gap-3">
-          <Link className="action-link action-link-secondary" to={`/${params.eventSlug}/tasks`}>
+          <Link
+            className="action-link action-link-secondary"
+            data-analytics-cta-name="back_to_tasks"
+            data-analytics-event="scan_camera_navigation_click"
+            data-analytics-location="footer"
+            to={`/${params.eventSlug}/tasks`}
+          >
             Back to tasks
           </Link>
         </div>

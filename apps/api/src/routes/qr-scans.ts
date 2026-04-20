@@ -30,6 +30,11 @@ async function loadSessionPayload(sessionId: string) {
   const session = await prisma.participantSession.findUniqueOrThrow({
     where: { id: sessionId },
     include: {
+      participantAccount: {
+        select: {
+          accountUuid: true,
+        },
+      },
       taskAttempts: true,
       rewardEligibility: true,
     },

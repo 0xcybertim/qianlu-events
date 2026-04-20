@@ -240,7 +240,7 @@ When a task requires staff verification:
 
 V1 will use an anonymous participant session token as the default session model.
 
-Lead information such as name and email can be collected through task flows and attached to the session. Email-based login may be added later, but it is not required for v1 participation.
+Lead information such as name and email can be collected through task flows and attached to the session. Participants may optionally request an email magic link to attach the current session to a participant account and resume that event progress from another device. Email login is not required for participation.
 
 ## Participant Experience
 

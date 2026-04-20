@@ -49,6 +49,11 @@ async function loadStaffSession(eventSlug: string, verificationCode: string) {
       verificationCode,
     },
     include: {
+      participantAccount: {
+        select: {
+          accountUuid: true,
+        },
+      },
       taskAttempts: true,
       rewardEligibility: true,
     },

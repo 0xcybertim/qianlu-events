@@ -1,5 +1,6 @@
 import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
+import { clerkPlugin } from "@clerk/fastify";
 import Fastify from "fastify";
 
 import { registerAdminRoutes } from "./routes/admin.js";
@@ -49,6 +50,13 @@ export function createApp() {
   void app.register(cookie, {
     hook: "onRequest",
   });
+
+  if (process.env.CLERK_SECRET_KEY && process.env.CLERK_PUBLISHABLE_KEY) {
+    void app.register(clerkPlugin, {
+      publishableKey: process.env.CLERK_PUBLISHABLE_KEY,
+      secretKey: process.env.CLERK_SECRET_KEY,
+    });
+  }
 
   registerHealthRoutes(app);
   registerFacebookRoutes(app);

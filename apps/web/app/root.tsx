@@ -1,3 +1,5 @@
+import { ClerkProvider } from "@clerk/react-router";
+import { clerkMiddleware, rootAuthLoader } from "@clerk/react-router/server";
 import {
   isRouteErrorResponse,
   Links,
@@ -9,6 +11,16 @@ import {
 
 import type { Route } from "./+types/root";
 import "./app.css";
+
+const clerkPublishableKey =
+  import.meta.env.VITE_CLERK_PUBLISHABLE_KEY ??
+  "";
+const clerkSecretKey = import.meta.env.SSR
+  ? (process.env.CLERK_SECRET_KEY ?? "")
+  : "";
+const clerkEnabled =
+  Boolean(clerkPublishableKey) &&
+  (import.meta.env.SSR ? Boolean(clerkSecretKey) : true);
 
 export const links: Route.LinksFunction = () => [
   { rel: "preconnect", href: "https://fonts.googleapis.com" },
@@ -22,6 +34,16 @@ export const links: Route.LinksFunction = () => [
     href: "https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap",
   },
 ];
+
+export const middleware = clerkEnabled ? [clerkMiddleware()] : [];
+
+export async function loader(args: Route.LoaderArgs) {
+  if (!clerkEnabled) {
+    return null;
+  }
+
+  return rootAuthLoader(args);
+}
 
 export function Layout({ children }: { children: React.ReactNode }) {
   return (
@@ -41,8 +63,16 @@ export function Layout({ children }: { children: React.ReactNode }) {
   );
 }
 
-export default function App() {
-  return <Outlet />;
+export default function App({ loaderData }: Route.ComponentProps) {
+  if (!clerkEnabled) {
+    return <Outlet />;
+  }
+
+  return (
+    <ClerkProvider loaderData={loaderData} publishableKey={clerkPublishableKey}>
+      <Outlet />
+    </ClerkProvider>
+  );
 }
 
 export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {

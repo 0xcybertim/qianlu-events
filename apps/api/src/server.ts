@@ -1,8 +1,18 @@
-import "dotenv/config";
+import dotenv from "dotenv";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
-import { getApiConfig } from "@qianlu-events/config";
+const serverDir = dirname(fileURLToPath(import.meta.url));
+const apiDir = resolve(serverDir, "..");
+const repoRoot = resolve(apiDir, "..", "..");
 
-import { createApp } from "./app.js";
+dotenv.config({ path: resolve(repoRoot, ".env") });
+dotenv.config({ path: resolve(apiDir, ".env"), override: true });
+
+const [{ getApiConfig }, { createApp }] = await Promise.all([
+  import("@qianlu-events/config"),
+  import("./app.js"),
+]);
 
 const config = getApiConfig();
 const app = createApp();

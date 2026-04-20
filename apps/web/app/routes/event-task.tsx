@@ -15,6 +15,11 @@ import {
 import { getBrandingStyle } from "../lib/branding";
 import { getStatusMeta, mapTaskAttempts } from "../lib/experience";
 import {
+  getTaskAnalyticsParams,
+  summarizeAnalyticsCounts,
+  trackParticipantAnalyticsEvent,
+} from "../lib/marketing";
+import {
   getTaskActionLinks,
   getTaskCategoryLabel,
   getTaskInstructions,
@@ -31,7 +36,13 @@ function humanizeTaskId(taskId: string) {
     .join(" ");
 }
 
-function CopyCommentButton({ value }: { value: string }) {
+function CopyCommentButton({
+  analyticsParams,
+  value,
+}: {
+  analyticsParams: Record<string, string | number | boolean | null | undefined>;
+  value: string;
+}) {
   const [copied, setCopied] = useState(false);
 
   return (
@@ -41,9 +52,17 @@ function CopyCommentButton({ value }: { value: string }) {
         try {
           await navigator.clipboard.writeText(value);
           setCopied(true);
+          trackParticipantAnalyticsEvent({
+            googleEventName: "comment_copy_success",
+            params: analyticsParams,
+          });
           window.setTimeout(() => setCopied(false), 1500);
         } catch {
           setCopied(false);
+          trackParticipantAnalyticsEvent({
+            googleEventName: "comment_copy_failed",
+            params: analyticsParams,
+          });
         }
       }}
       type="button"
@@ -158,6 +177,25 @@ export default function EventTask({ loaderData, params }: Route.ComponentProps) 
   const isWhatsApp = taskItem.task.type === "WHATSAPP_OPT_IN";
   const isStampScan = taskItem.task.type === "STAMP_SCAN";
   const themeStyle = getBrandingStyle(loaderData);
+  const taskAnalyticsParams = getTaskAnalyticsParams(taskItem.task);
+  const taskAnalyticsAttributes = Object.fromEntries(
+    Object.entries(taskAnalyticsParams).map(([key, value]) => [
+      `data-analytics-${key.replace(/_/g, "-")}`,
+      String(value),
+    ]),
+  );
+  const actionLinkSummary = summarizeAnalyticsCounts(
+    actionLinks.map((link) => link.label),
+  );
+  const taskRouteAnalytics = {
+    ...taskAnalyticsParams,
+    action_link_count: actionLinks.length,
+    action_link_summary: actionLinkSummary || null,
+    has_inline_form: handlesInlineForm,
+    instructions_count: instructions.length,
+    is_auto_verifiable_social_comment_task: isAutoVerifiableSocialCommentTask,
+    task_status: taskItem.attempt?.status ?? "NOT_STARTED",
+  };
 
   return (
     <ScreenShell
@@ -168,6 +206,18 @@ export default function EventTask({ loaderData, params }: Route.ComponentProps) 
           ? `Open the ${socialPlatformLabel} post, leave the exact comment text shown below, then let the app wait for automatic verification.`
           : "Complete the task on this screen, submit your claim, and return to the summary when you are ready for staff verification."
       }
+      marketing={{
+        analytics: taskRouteAnalytics,
+        eventName: loaderData.event.name,
+        eventSlug: loaderData.event.slug,
+        page: "task-detail",
+        sessionKey: session.verificationCode,
+        settings: loaderData.event.settingsJson,
+        task: taskItem.task,
+        taskStatus: taskItem.attempt?.status ?? "NOT_STARTED",
+        verifiedTaskIds:
+          taskItem.attempt?.status === "VERIFIED" ? [taskItem.task.id] : [],
+      }}
       style={themeStyle}
     >
       <div className="space-y-4">
@@ -213,6 +263,13 @@ export default function EventTask({ loaderData, params }: Route.ComponentProps) 
                       ? "action-link action-link-primary"
                       : "action-link action-link-secondary"
                   }
+                  data-analytics-cta-label={link.label}
+                  data-analytics-event="task_external_link_click"
+                  data-analytics-link-tone={link.tone}
+                  data-analytics-link-type={
+                    link.tone === "primary" ? "primary_url" : "secondary_url"
+                  }
+                  {...taskAnalyticsAttributes}
                   href={link.href}
                   rel="noreferrer"
                   target="_blank"
@@ -323,7 +380,13 @@ export default function EventTask({ loaderData, params }: Route.ComponentProps) 
                 </label>
               ) : null}
 
-              <Button type="submit">
+              <Button
+                data-analytics-event="task_form_submit_click"
+                data-analytics-form-type={taskItem.task.type}
+                data-analytics-location="task_detail"
+                {...taskAnalyticsAttributes}
+                type="submit"
+              >
                 Submit task
               </Button>
             </Form>
@@ -333,7 +396,14 @@ export default function EventTask({ loaderData, params }: Route.ComponentProps) 
                 Scan this stamp QR code at the event. The task updates
                 automatically when the stamp is accepted.
               </div>
-              <Link className="action-link action-link-primary w-full" to={`/${params.eventSlug}/scan`}>
+              <Link
+                className="action-link action-link-primary w-full"
+                data-analytics-cta-name="open_scanner"
+                data-analytics-event="task_scan_cta_click"
+                data-analytics-location="task_detail"
+                {...taskAnalyticsAttributes}
+                to={`/${params.eventSlug}/scan`}
+              >
                 Open scanner
               </Link>
             </div>
@@ -359,10 +429,18 @@ export default function EventTask({ loaderData, params }: Route.ComponentProps) 
                 </p>
               </div>
               <div className="mt-4 flex flex-wrap gap-3">
-                <CopyCommentButton value={requiredCommentText} />
+                <CopyCommentButton
+                  analyticsParams={taskAnalyticsParams}
+                  value={requiredCommentText}
+                />
                 <Form method="post">
                   <input name="intent" type="hidden" value="await-auto-verification" />
-                  <Button type="submit">
+                  <Button
+                    data-analytics-event="task_auto_verification_click"
+                    data-analytics-location="task_detail"
+                    {...taskAnalyticsAttributes}
+                    type="submit"
+                  >
                     {taskItem.attempt?.status === "PENDING_AUTO_VERIFICATION"
                       ? "Check again"
                       : "I've commented"}
@@ -390,14 +468,27 @@ export default function EventTask({ loaderData, params }: Route.ComponentProps) 
                 <Form method="post">
                   <input name="intent" type="hidden" value="claim" />
                   <input name="status" type="hidden" value="COMPLETED_BY_USER" />
-                  <Button type="submit">
+                  <Button
+                    data-analytics-claim-path="completed_by_user"
+                    data-analytics-event="task_claim_click"
+                    data-analytics-location="task_detail"
+                    {...taskAnalyticsAttributes}
+                    type="submit"
+                  >
                     {getTaskPrimaryActionLabel(taskItem.task)}
                   </Button>
                 </Form>
                 <Form method="post">
                   <input name="intent" type="hidden" value="claim" />
                   <input name="status" type="hidden" value="PENDING_STAFF_CHECK" />
-                  <Button tone="secondary" type="submit">
+                  <Button
+                    data-analytics-claim-path="pending_staff_check"
+                    data-analytics-event="task_claim_click"
+                    data-analytics-location="task_detail"
+                    {...taskAnalyticsAttributes}
+                    tone="secondary"
+                    type="submit"
+                  >
                     {getTaskSecondaryActionLabel(taskItem.task)}
                   </Button>
                 </Form>
@@ -407,10 +498,24 @@ export default function EventTask({ loaderData, params }: Route.ComponentProps) 
         </div>
 
         <div className="flex flex-col gap-3">
-          <Link className="action-link action-link-primary" to={`/${params.eventSlug}/summary`}>
+          <Link
+            className="action-link action-link-primary"
+            data-analytics-cta-name="continue_to_summary"
+            data-analytics-event="task_navigation_click"
+            data-analytics-location="footer"
+            {...taskAnalyticsAttributes}
+            to={`/${params.eventSlug}/summary`}
+          >
             Continue to summary
           </Link>
-          <Link className="action-link action-link-secondary" to={`/${params.eventSlug}/tasks`}>
+          <Link
+            className="action-link action-link-secondary"
+            data-analytics-cta-name="back_to_task_list"
+            data-analytics-event="task_navigation_click"
+            data-analytics-location="footer"
+            {...taskAnalyticsAttributes}
+            to={`/${params.eventSlug}/tasks`}
+          >
             Back to task list
           </Link>
         </div>

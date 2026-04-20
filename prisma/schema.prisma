@@ -96,6 +96,7 @@ model Event {
   adminAccess        AdminEventAccess[]
   adminFacebookOauthStates AdminFacebookOAuthState[]
   adminInstagramOauthStates AdminInstagramOAuthState[]
+  participantLoginTokens ParticipantLoginToken[]
   facebookConnection EventFacebookConnection?
   instagramConnection EventInstagramConnection?
 }
@@ -136,6 +137,32 @@ model AdminSession {
   adminAccount   AdminAccount @relation(fields: [adminAccountId], references: [id], onDelete: Cascade)
 
   @@index([adminAccountId])
+  @@index([expiresAt])
+}
+
+model ParticipantAccount {
+  id          String                  @id @default(cuid())
+  accountUuid String                  @unique @default(uuid())
+  clerkUserId String?                 @unique
+  email       String                  @unique
+  createdAt   DateTime                @default(now())
+  updatedAt   DateTime                @updatedAt
+  loginTokens ParticipantLoginToken[]
+  sessions    ParticipantSession[]
+}
+
+model ParticipantLoginToken {
+  id                   String             @id @default(cuid())
+  participantAccountId String
+  eventId              String
+  tokenHash            String             @unique
+  expiresAt            DateTime
+  consumedAt           DateTime?
+  createdAt            DateTime           @default(now())
+  participantAccount   ParticipantAccount @relation(fields: [participantAccountId], references: [id], onDelete: Cascade)
+  event                Event              @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([participantAccountId, eventId])
   @@index([expiresAt])
 }
 
@@ -200,6 +227,7 @@ model Task {
 model ParticipantSession {
   id                    String               @id @default(cuid())
   eventId               String
+  participantAccountId  String?
   anonymousToken        String               @unique
   verificationCode      String
   email                 String?
@@ -212,6 +240,7 @@ model ParticipantSession {
   createdAt             DateTime             @default(now())
   updatedAt             DateTime             @updatedAt
   event                 Event                @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  participantAccount    ParticipantAccount?  @relation(fields: [participantAccountId], references: [id], onDelete: SetNull)
   qrScans               QrScan[]
   rewardEligibility     RewardEligibility[]
   socialCommentVerifications SocialCommentVerification[]
@@ -219,7 +248,9 @@ model ParticipantSession {
   verificationActions   VerificationAction[]
 
   @@unique([eventId, verificationCode])
+  @@unique([participantAccountId, eventId])
   @@index([eventId])
+  @@index([participantAccountId])
 }
 
 model TaskAttempt {

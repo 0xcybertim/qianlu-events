@@ -1,10 +1,15 @@
 import type { CSSProperties, ReactNode } from "react";
 
+import { ParticipantMarketing } from "./participant-marketing";
+import type { ParticipantMarketingConfig } from "../lib/marketing";
+
 type ScreenShellProps = {
   eyebrow?: string;
   title: string;
   description: string;
   children: ReactNode;
+  marketing?: ParticipantMarketingConfig;
+  topContent?: ReactNode;
   style?: CSSProperties;
   width?: "default" | "wide";
 };
@@ -14,7 +19,9 @@ export function ScreenShell({
   title,
   description,
   children,
+  marketing,
   style,
+  topContent,
   width = "default",
 }: ScreenShellProps) {
   return (
@@ -24,6 +31,7 @@ export function ScreenShell({
       }`}
       style={style}
     >
+      {topContent}
       <div className="flex-1">
         <header className="space-y-4">
           {eyebrow ? (
@@ -43,6 +51,7 @@ export function ScreenShell({
 
         <section className="mt-8">{children}</section>
       </div>
+      {marketing ? <ParticipantMarketing config={marketing} /> : null}
     </main>
   );
 }

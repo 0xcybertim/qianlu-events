@@ -65,6 +65,31 @@ export const rewardTierSchema = z.object({
   threshold: z.number().int().nonnegative(),
 });
 
+export const participantMessagingSchema = z.object({
+  saveProgressMessage: z.string().trim().min(1).optional(),
+  prizeDrawLabel: z.string().trim().min(1).optional(),
+  laterPrizeLabel: z.string().trim().min(1).optional(),
+});
+
+export const eventMarketingSchema = z
+  .object({
+    primaryPixelId: z.string().trim().min(1).optional(),
+    secondaryPixelId: z.string().trim().min(1).optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (
+      value.primaryPixelId &&
+      value.secondaryPixelId &&
+      value.primaryPixelId === value.secondaryPixelId
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Use two different pixel IDs or leave the second one blank.",
+        path: ["secondaryPixelId"],
+      });
+    }
+  });
+
 export const eventBrandingSchema = z.object({
   primary: z.string(),
   primaryContrast: z.string(),
@@ -78,6 +103,8 @@ export const eventBrandingSchema = z.object({
 export const eventSettingsSchema = z.object({
   rewardTypes: z.array(rewardTypeSchema),
   rewardTiers: z.array(rewardTierSchema),
+  participantMessaging: participantMessagingSchema.optional(),
+  marketing: eventMarketingSchema.optional(),
 });
 
 export const taskConfigSchema = z.object({
@@ -156,6 +183,7 @@ export const rewardEligibilitySchema = z.object({
 export const participantSessionSchema = z.object({
   id: z.string(),
   eventId: z.string(),
+  participantAccountUuid: z.string().nullable().optional(),
   verificationCode: z.string(),
   email: z.string().nullable().optional(),
   name: z.string().nullable().optional(),
@@ -190,6 +218,32 @@ export const experienceResponseSchema = z.object({
 
 export const createSessionBodySchema = z.object({
   eventSlug: z.string().min(1),
+});
+
+export const participantLoginLinkRequestBodySchema = z.object({
+  email: z.email().transform((value) => value.toLowerCase()),
+  eventSlug: z.string().trim().min(1),
+});
+
+export const participantClerkLinkBodySchema = z.object({
+  eventSlug: z.string().trim().min(1),
+});
+
+export const participantLoginLinkConsumeBodySchema = z.object({
+  token: z.string().trim().min(24),
+});
+
+export const participantLoginLinkRequestResponseSchema = z.object({
+  ok: z.boolean(),
+  devLoginUrl: z.string().url().nullable().optional(),
+  email: z.string(),
+  expiresAt: z.string(),
+});
+
+export const participantLoginLinkConsumeResponseSchema = z.object({
+  ok: z.boolean(),
+  eventSlug: z.string(),
+  session: participantSessionSchema,
 });
 
 export const taskClaimBodySchema = z.object({
@@ -786,6 +840,9 @@ export type RewardType = z.infer<typeof rewardTypeSchema>;
 export type QrScanStatus = z.infer<typeof qrScanStatusSchema>;
 export type AdminRole = z.infer<typeof adminRoleSchema>;
 export type RewardTier = z.infer<typeof rewardTierSchema>;
+export type ParticipantMessaging = z.infer<typeof participantMessagingSchema>;
+export type EventSettings = z.infer<typeof eventSettingsSchema>;
+export type EventMarketing = z.infer<typeof eventMarketingSchema>;
 export type TaskConfig = z.infer<typeof taskConfigSchema>;
 export type FacebookCommentTaskConfig = z.infer<
   typeof facebookCommentTaskConfigSchema
@@ -796,6 +853,12 @@ export type InstagramCommentTaskConfig = z.infer<
 export type TaskLike = z.infer<typeof taskSchema>;
 export type TaskAttemptLike = z.infer<typeof taskAttemptSchema>;
 export type ExperienceResponse = z.infer<typeof experienceResponseSchema>;
+export type ParticipantLoginLinkRequestResponse = z.infer<
+  typeof participantLoginLinkRequestResponseSchema
+>;
+export type ParticipantLoginLinkConsumeResponse = z.infer<
+  typeof participantLoginLinkConsumeResponseSchema
+>;
 export type QrScanBody = z.infer<typeof qrScanBodySchema>;
 export type QrScanResult = z.infer<typeof qrScanResultSchema>;
 export type StaffSessionLookupResponse = z.infer<

@@ -416,7 +416,9 @@ These should remain future-ready in naming and schema design, but they do not ne
 
 ### V1 Session Strategy
 
-Use anonymous participant sessions with a secure token.
+Use anonymous participant sessions with a secure token by default, with optional
+email magic-link login for participants who want to resume progress on another
+device.
 
 Behavior:
 
@@ -424,23 +426,27 @@ Behavior:
 - the participant receives an `httpOnly` cookie with the session token
 - subsequent requests reuse the session
 - lead data such as name and email can be attached later through form tasks
+- requesting a participant login link creates a short-lived one-time token
+- consuming the link attaches the current anonymous session to the participant
+  account, or resumes the account-linked session for that event
 
 ### Why This Is The Right V1 Choice
 
 - lowest friction on the event floor
 - no mandatory sign-up before participation
 - still allows lead capture through tasks
-- supports future upgrade to email-based login later
+- allows optional cross-device resume without making accounts mandatory
 
-### Future Support
+### Participant Account Support
 
-Later, the system can add:
+The account layer is intentionally small:
 
-- email-based login
-- magic links
-- account-linked participant history
+- `ParticipantAccount` stores a unique email address.
+- `ParticipantLoginToken` stores hashed one-time magic-link tokens.
+- `ParticipantSession.participantAccountId` links one event session to an
+  account after email verification.
 
-V1 should not block this, but should not require it either.
+Anonymous sessions remain fully supported when participants skip email login.
 
 ## Verification Architecture
 

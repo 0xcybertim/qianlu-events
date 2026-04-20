@@ -10,6 +10,7 @@ type AdminShellProps = {
 
 const eventNavItems = [
   { label: "Overview", to: "" },
+  { label: "Marketing", to: "marketing" },
   { label: "Tasks", to: "tasks" },
   { label: "QR Codes", to: "qr-codes" },
   { label: "Participants", to: "participants" },

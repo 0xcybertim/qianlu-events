@@ -61,6 +61,11 @@ export function registerEventRoutes(app: FastifyInstance) {
               eventId: event.id,
             },
             include: {
+              participantAccount: {
+                select: {
+                  accountUuid: true,
+                },
+              },
               taskAttempts: true,
               rewardEligibility: true,
             },

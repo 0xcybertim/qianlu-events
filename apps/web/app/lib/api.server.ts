@@ -20,6 +20,8 @@ import {
   eventWithTasksSchema,
   experienceResponseSchema,
   participantSessionSchema,
+  participantLoginLinkConsumeResponseSchema,
+  participantLoginLinkRequestResponseSchema,
   staffSessionLookupResponseSchema,
 } from "@qianlu-events/schemas";
 
@@ -578,6 +580,66 @@ export async function fetchExperience(eventSlug: string, request?: Request) {
       headers: forwardSetCookie(sessionResponse),
     },
   );
+}
+
+export async function requestParticipantLoginLink(
+  eventSlug: string,
+  email: string,
+  request?: Request,
+) {
+  const response = await apiRequest({
+    method: "POST",
+    path: "/participant-auth/login-link",
+    body: {
+      email,
+      eventSlug,
+    },
+    request,
+  });
+
+  return participantLoginLinkRequestResponseSchema.parse(await response.json());
+}
+
+export async function linkParticipantClerkAccount(
+  eventSlug: string,
+  clerkToken: string,
+  request?: Request,
+) {
+  const response = await apiRequest({
+    method: "POST",
+    path: "/participant-auth/clerk-link",
+    body: {
+      eventSlug,
+    },
+    headers: {
+      Authorization: `Bearer ${clerkToken}`,
+    },
+    request,
+  });
+
+  return {
+    headers: forwardSetCookie(response),
+    payload: participantLoginLinkConsumeResponseSchema.parse(await response.json()),
+  };
+}
+
+export async function consumeParticipantLoginLink(
+  token: string,
+  request?: Request,
+) {
+  const response = await apiRequest({
+    method: "POST",
+    path: "/participant-auth/consume-login-link",
+    body: {
+      token,
+    },
+    request,
+  });
+
+  return {
+    headers: forwardSetCookie(response),
+    payload: participantLoginLinkConsumeResponseSchema.parse(await response.json()),
+  };
 }
 
 export async function parseParticipantSessionResponse(response: Response) {
