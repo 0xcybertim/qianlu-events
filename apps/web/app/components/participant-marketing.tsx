@@ -228,9 +228,9 @@ function ensureGoogleAnalyticsLoaded(measurementId: string) {
   window.dataLayer = window.dataLayer ?? [];
   window.gtag =
     window.gtag ??
-    ((...args: GtagArgs) => {
-      window.dataLayer?.push(args);
-    });
+    (function (...args: GtagArgs) {
+      window.dataLayer?.push(arguments);
+    } as GtagFunction);
 
   if (existingScript) {
     window.__qianluGoogleAnalyticsLoading = Promise.resolve();
