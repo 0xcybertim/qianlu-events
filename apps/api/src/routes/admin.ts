@@ -26,6 +26,7 @@ import {
   eventSettingsSchema,
   facebookCommentTaskConfigSchema,
   instagramCommentTaskConfigSchema,
+  taskConfigSchema,
   type TaskAttemptStatus,
 } from "@qianlu-events/schemas";
 import { z } from "zod";
@@ -53,6 +54,7 @@ import { prisma } from "../lib/prisma.js";
 
 const leadTaskTypes = [
   "LEAD_FORM",
+  "QUIZ",
   "NEWSLETTER_OPT_IN",
   "WHATSAPP_OPT_IN",
 ] as const;
@@ -272,6 +274,95 @@ function getProofBoolean(proofJson: unknown, key: string) {
   const value = proof?.[key];
 
   return typeof value === "boolean" ? value : null;
+}
+
+function getProofRecord(proofJson: unknown, key: string) {
+  const proof = getProofObject(proofJson);
+  const value = proof?.[key];
+
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function normalizeLeadAnswerValue(value: unknown) {
+  if (typeof value === "string" || typeof value === "boolean") {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    const values = value.filter(
+      (entry): entry is string => typeof entry === "string" && entry.length > 0,
+    );
+
+    return values.length > 0 ? values : null;
+  }
+
+  return null;
+}
+
+function buildLeadSubmissionDetails(args: {
+  proofJson: unknown;
+  taskConfig: unknown;
+}) {
+  const parsedConfig = taskConfigSchema.safeParse(args.taskConfig ?? null);
+  const responses = getProofRecord(args.proofJson, "responses");
+  const otherResponses = getProofRecord(args.proofJson, "otherResponses");
+  const groupSelections = getProofRecord(args.proofJson, "groupSelections");
+
+  if (!parsedConfig.success) {
+    return {
+      answers: [],
+      selectedInterests: [],
+    };
+  }
+
+  const selectedInterests =
+    parsedConfig.data.formGroups
+      ?.filter((group) => groupSelections[group.id] === true)
+      .map((group) => group.title) ?? [];
+
+  const questions = [
+    ...(parsedConfig.data.formQuestions ?? []).map((question) => ({
+      groupTitle: null,
+      question,
+    })),
+    ...(parsedConfig.data.formGroups ?? []).flatMap((group) =>
+      group.questions.map((question) => ({
+        groupTitle: group.title,
+        question,
+      })),
+    ),
+  ];
+
+  const answers = questions.flatMap(({ groupTitle, question }) => {
+    const value = normalizeLeadAnswerValue(responses[question.id]);
+    const otherValue =
+      typeof otherResponses[question.id] === "string"
+        ? otherResponses[question.id]
+        : null;
+
+    if (value === null && !otherValue) {
+      return [];
+    }
+
+    return [
+      {
+        id: question.id,
+        label: question.label,
+        groupTitle,
+        value,
+        otherValue,
+      },
+    ];
+  });
+
+  return {
+    answers,
+    selectedInterests,
+  };
 }
 
 function getSocialCommentProof(proofJson: unknown) {
@@ -1276,18 +1367,27 @@ async function loadLeads(eventSlug: string) {
     orderBy: [{ claimedAt: "desc" }, { updatedAt: "desc" }],
   });
 
-  return attempts.map((attempt) => ({
-    id: attempt.id,
-    verificationCode: attempt.participantSession.verificationCode,
-    name: attempt.participantSession.name,
-    email: attempt.participantSession.email,
-    optIn: getProofBoolean(attempt.proofJson, "optIn"),
-    submittedTask: attempt.task.title,
-    submittedTaskId: attempt.taskId,
-    status: attempt.status,
-    submittedAt: serializeDate(attempt.claimedAt ?? attempt.updatedAt),
-    proofJson: attempt.proofJson,
-  }));
+  return attempts.map((attempt) => {
+    const submissionDetails = buildLeadSubmissionDetails({
+      proofJson: attempt.proofJson,
+      taskConfig: attempt.task.configJson,
+    });
+
+    return {
+      id: attempt.id,
+      verificationCode: attempt.participantSession.verificationCode,
+      name: attempt.participantSession.name,
+      email: attempt.participantSession.email,
+      optIn: getProofBoolean(attempt.proofJson, "optIn"),
+      submittedTask: attempt.task.title,
+      submittedTaskId: attempt.taskId,
+      status: attempt.status,
+      submittedAt: serializeDate(attempt.claimedAt ?? attempt.updatedAt),
+      selectedInterests: submissionDetails.selectedInterests,
+      answers: submissionDetails.answers,
+      proofJson: attempt.proofJson,
+    };
+  });
 }
 
 function getQrCodeRunningState(qrCode: {

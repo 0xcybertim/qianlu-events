@@ -42,7 +42,7 @@ export default function EventLanding({ loaderData, params }: Route.ComponentProp
     <ScreenShell
       eyebrow="Scan. Complete. Show. Win."
       title={eventName}
-      description="Visitors complete social and lead tasks, collect points, and show this experience to staff for reward verification."
+      description="Visitors complete social and lead activities, collect points, and show this experience to staff for reward verification."
       marketing={{
         analytics: {
           has_session: Boolean(loaderData.session),
@@ -67,7 +67,7 @@ export default function EventLanding({ loaderData, params }: Route.ComponentProp
                 Reward structure
               </p>
               <h2 className="mt-3 font-display text-2xl font-semibold">
-                Earn points across socials, leads, and booth tasks
+                Earn points across socials, leads, and booth activities
               </h2>
             </div>
             <span className="rounded-full bg-[var(--color-secondary)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-900">
@@ -75,7 +75,7 @@ export default function EventLanding({ loaderData, params }: Route.ComponentProp
             </span>
           </div>
           <ul className="mt-5 space-y-3 text-sm leading-6 text-slate-700">
-            <li>{loaderData.event.tasks.length} active tasks configured for this event</li>
+            <li>{loaderData.event.tasks.length} active activities configured for this event</li>
             <li>
               {rewardTiers.length > 0
                 ? `Reward tiers start at ${rewardTiers[0]?.threshold} points`
@@ -110,7 +110,7 @@ export default function EventLanding({ loaderData, params }: Route.ComponentProp
               data-analytics-location="hero"
               to={`/${params.eventSlug}/tasks`}
             >
-              Start tasks
+              Start activities
             </Link>
             <Link
               className="action-link action-link-secondary"

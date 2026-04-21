@@ -635,7 +635,7 @@ function ClerkAccountContent({
             data-analytics-location="footer"
             to={`/${params.eventSlug}/tasks`}
           >
-            Back to tasks
+            Back to activities
           </Link>
         </div>
       </div>
@@ -680,7 +680,7 @@ export default function EventAccount(props: Route.ComponentProps) {
             data-analytics-location="footer"
             to={`/${props.params.eventSlug}/tasks`}
           >
-            Back to tasks
+            Back to activities
           </Link>
         </div>
       </ScreenShell>

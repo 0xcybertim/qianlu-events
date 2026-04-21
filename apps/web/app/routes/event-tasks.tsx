@@ -16,6 +16,10 @@ import {
 import { getTaskCategoryLabel } from "../lib/task-presentation";
 import { ScreenShell } from "../components/screen-shell";
 
+function formatVerificationCode(code: string) {
+  return code.replace(/(.{3})/g, "$1 ").trim();
+}
+
 export async function loader({ params, request }: Route.LoaderArgs) {
   return fetchExperience(params.eventSlug, request);
 }
@@ -30,8 +34,32 @@ export default function EventTasks({ loaderData, params }: Route.ComponentProps)
   }
 
   const tasks = mapTaskAttempts(loaderData);
-  const rewardTiers = getRewardTiers(loaderData);
-  const nextTier = rewardTiers.find((tier) => tier.threshold > session.claimedPoints);
+  const socialFollowItems = tasks.filter(
+    (item) => item.task.type === "SOCIAL_FOLLOW",
+  );
+  type TaskAttemptItem = (typeof tasks)[number];
+  type RenderedTaskCard =
+    | { item: TaskAttemptItem; kind: "task" }
+    | { items: TaskAttemptItem[]; kind: "social-follow" };
+  const renderedTaskCards: RenderedTaskCard[] = [];
+
+  for (const item of tasks) {
+    if (item.task.type !== "SOCIAL_FOLLOW") {
+      renderedTaskCards.push({ item, kind: "task" });
+      continue;
+    }
+
+    if (item.task.id !== socialFollowItems[0]?.task.id) {
+      continue;
+    }
+
+    renderedTaskCards.push({ items: socialFollowItems, kind: "social-follow" });
+  }
+  const rewardTiers = [...getRewardTiers(loaderData)].sort(
+    (firstTier, secondTier) => firstTier.threshold - secondTier.threshold,
+  );
+  const nextRewardTier =
+    rewardTiers.find((tier) => session.claimedPoints < tier.threshold) ?? null;
   const themeStyle = getBrandingStyle(loaderData);
   const startedCount = tasks.filter(
     (item) => item.attempt && item.attempt.status !== "NOT_STARTED",
@@ -45,6 +73,11 @@ export default function EventTasks({ loaderData, params }: Route.ComponentProps)
   ).length;
   const verifiedCount = tasks.filter((item) => item.attempt?.status === "VERIFIED").length;
   const progressPct = tasks.length > 0 ? Math.round((startedCount / tasks.length) * 100) : 0;
+  const totalAvailablePoints = tasks.reduce((sum, item) => sum + item.task.points, 0);
+  const pointsProgressPct =
+    totalAvailablePoints > 0
+      ? Math.min(100, Math.round((session.claimedPoints / totalAvailablePoints) * 100))
+      : 0;
   const contactBannerText = getParticipantContactBannerText(
     loaderData.event.settingsJson,
   );
@@ -61,14 +94,14 @@ export default function EventTasks({ loaderData, params }: Route.ComponentProps)
 
   return (
     <ScreenShell
-      eyebrow="Task list"
-      title="Complete tasks and build your score"
-      description="This route will become the participant dashboard. It already reflects the intended layout: large task cards, visible statuses, and clear reward progress."
+      eyebrow="Activities"
+      title="Complete activities and build your score"
+      description="Choose activities, collect points, and keep your progress clear while you move through the event."
       marketing={{
         analytics: {
           account_connected: isAccountConnected,
           claimed_points: session.claimedPoints,
-          next_tier_threshold: nextTier?.threshold ?? null,
+          next_tier_threshold: nextRewardTier?.threshold ?? null,
           pending_review_count: pendingReviewCount,
           progress_percent: progressPct,
           started_count: startedCount,
@@ -110,49 +143,119 @@ export default function EventTasks({ loaderData, params }: Route.ComponentProps)
       }
     >
       <div className="flex flex-col gap-4">
-        <div className="grid grid-cols-[1fr_auto] gap-3">
-          <div className="card-surface rounded-[2rem] p-5">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--color-primary)]">
-              Progress
+        <div className="rounded-[2rem] bg-[var(--color-primary)] p-5 text-[var(--color-primary-contrast)] shadow-[0_24px_60px_-34px_rgba(15,109,83,0.72)]">
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[color:color-mix(in_srgb,var(--color-primary-contrast)_74%,transparent)]">
+            Your event code
+          </p>
+          <div className="mt-3 rounded-[1.5rem] bg-white/14 px-4 py-4 text-center">
+            <p className="font-display text-4xl font-semibold tracking-[0.18em]">
+              {formatVerificationCode(session.verificationCode)}
             </p>
-            <p className="mt-3 font-display text-4xl font-semibold">
-              {session.claimedPoints} points
-            </p>
-            <p className="mt-2 text-sm text-slate-700">
-              {startedCount} of {tasks.length} tasks started.
-              {nextTier
-                ? ` ${nextTier.label} is ${nextTier.threshold - session.claimedPoints} points away.`
-                : " Top tier reached for this event."}
-            </p>
-            <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/70">
-              <div
-                className="h-full rounded-full bg-[var(--color-primary)]"
-                style={{ width: `${progressPct}%` }}
-              />
+          </div>
+          <div className="mt-4 space-y-4">
+            <div>
+              <div className="flex items-baseline justify-between gap-4">
+                <p className="text-sm font-semibold opacity-86">Points earned</p>
+                <p className="font-display text-2xl font-semibold">
+                  {session.claimedPoints}/{totalAvailablePoints}
+                </p>
+              </div>
+              <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/20">
+                <div
+                  className="h-full rounded-full bg-[var(--color-secondary)]"
+                  style={{ width: `${pointsProgressPct}%` }}
+                />
+              </div>
+            </div>
+            <div>
+              <div className="flex items-baseline justify-between gap-4">
+                <p className="text-sm font-semibold opacity-86">Activities completed</p>
+                <p className="font-display text-2xl font-semibold">
+                  {startedCount}/{tasks.length}
+                </p>
+              </div>
+              <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/20">
+                <div
+                  className="h-full rounded-full bg-[var(--color-secondary)]"
+                  style={{ width: `${progressPct}%` }}
+                />
+              </div>
             </div>
           </div>
-          <div className="card-surface rounded-[2rem] p-5 text-right">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--color-primary)]">
-              Verified
-            </p>
-            <p className="mt-3 font-display text-3xl font-semibold">
-              {session.verifiedPoints}
-            </p>
-            <p className="mt-2 text-xs uppercase tracking-[0.14em] text-slate-600">
-              Points confirmed
-            </p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <span className="rounded-full bg-white/16 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em]">
+              Tier: {session.rewardTier ?? "Not unlocked"}
+            </span>
+            <span className="rounded-full bg-white/16 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em]">
+              Raffle: {session.dailyDrawEligible ? "Active" : "Locked"}
+            </span>
           </div>
         </div>
 
-        <Link
-          className="action-link action-link-primary w-full"
-          data-analytics-cta-name="scan_stamp_qr"
-          data-analytics-event="tasks_cta_click"
-          data-analytics-location="primary_actions"
-          to={`/${params.eventSlug}/scan`}
-        >
-          Scan stamp QR
-        </Link>
+        {rewardTiers.length > 0 ? (
+          <div className="card-surface rounded-[2rem] p-5">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--color-primary)]">
+                  Rewards
+                </p>
+                <h2 className="mt-2 font-display text-2xl font-semibold text-slate-950">
+                  What you unlocked
+                </h2>
+              </div>
+              <span className="rounded-full bg-[var(--color-primary)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-[var(--color-primary-contrast)]">
+                {session.claimedPoints} pts
+              </span>
+            </div>
+            <div className="mt-4 space-y-3">
+              {rewardTiers.map((tier) => {
+                const isUnlocked = session.claimedPoints >= tier.threshold;
+                const pointsRemaining = Math.max(
+                  tier.threshold - session.claimedPoints,
+                  0,
+                );
+
+                return (
+                  <div
+                    className={[
+                      "rounded-2xl border px-4 py-3",
+                      isUnlocked
+                        ? "border-[var(--color-primary)] bg-[color:color-mix(in_srgb,var(--color-primary)_10%,white)]"
+                        : "border-[var(--color-border)] bg-white/70",
+                    ].join(" ")}
+                    key={tier.key}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="font-semibold text-slate-950">
+                          {tier.label}
+                        </p>
+                        <p className="mt-1 text-sm text-slate-600">
+                          {tier.threshold} points needed
+                        </p>
+                        {tier.description ? (
+                          <p className="mt-2 text-sm leading-6 text-slate-600">
+                            {tier.description}
+                          </p>
+                        ) : null}
+                      </div>
+                      <span
+                        className={[
+                          "rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em]",
+                          isUnlocked
+                            ? "bg-[var(--color-primary)] text-[var(--color-primary-contrast)]"
+                            : "bg-slate-950/7 text-slate-600",
+                        ].join(" ")}
+                      >
+                        {isUnlocked ? "Unlocked" : `${pointsRemaining} to go`}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
 
         <div className="card-surface rounded-[2rem] p-5">
           <p className="text-sm leading-6 text-slate-700">{contactBannerText}</p>
@@ -167,65 +270,108 @@ export default function EventTasks({ loaderData, params }: Route.ComponentProps)
           </Link>
         </div>
 
-        <div className="grid grid-cols-3 gap-3">
-          <div className="card-surface rounded-[1.5rem] p-4">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-              Started
-            </p>
-            <p className="mt-2 font-display text-2xl font-semibold">{startedCount}</p>
-          </div>
-          <div className="card-surface rounded-[1.5rem] p-4">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-              Pending
-            </p>
-            <p className="mt-2 font-display text-2xl font-semibold">{pendingReviewCount}</p>
-          </div>
-          <div className="card-surface rounded-[1.5rem] p-4">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-              Verified
-            </p>
-            <p className="mt-2 font-display text-2xl font-semibold">{verifiedCount}</p>
-          </div>
-        </div>
-
         <div className="space-y-3">
-          {tasks.map(({ attempt, status, task }) => (
-            <Link
-              className="card-surface block rounded-[2rem] p-5 transition-transform duration-150 hover:-translate-y-0.5"
-              data-analytics-attempt-status={attempt?.status ?? "NOT_STARTED"}
-              data-analytics-event="task_card_click"
-              data-analytics-location="task_list"
-              data-analytics-task-status={attempt?.status ?? "NOT_STARTED"}
-              {...Object.fromEntries(
-                Object.entries(getTaskAnalyticsParams(task)).map(([key, value]) => [
-                  `data-analytics-${key.replace(/_/g, "-")}`,
-                  String(value),
-                ]),
-              )}
-              key={task.id}
-              to={`/${params.eventSlug}/tasks/${task.id}`}
-            >
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--color-primary)]">
-                    {getTaskCategoryLabel(task)} • {task.points} point{task.points === 1 ? "" : "s"}
-                  </p>
-                  <h2 className="mt-3 font-display text-2xl font-semibold">
-                    {task.title}
-                  </h2>
-                  <p className="mt-2 text-sm leading-6 text-slate-700">
-                    {task.description}
-                  </p>
+          {renderedTaskCards.map((card) => {
+            if (card.kind === "social-follow") {
+              const firstItem = card.items[0];
+
+              if (!firstItem) {
+                return null;
+              }
+
+              const startedFollowCount = card.items.filter(
+                (item) => item.attempt && item.attempt.status !== "NOT_STARTED",
+              ).length;
+              const verifiedFollowCount = card.items.filter(
+                (item) => item.attempt?.status === "VERIFIED",
+              ).length;
+              const totalFollowPoints = card.items.reduce(
+                (sum, item) => sum + item.task.points,
+                0,
+              );
+              const groupStatus =
+                verifiedFollowCount === card.items.length
+                  ? { label: "Verified", tone: "verified" as const }
+                  : startedFollowCount > 0
+                    ? {
+                        label: `${startedFollowCount}/${card.items.length} done`,
+                        tone: "claimed" as const,
+                      }
+                    : { label: "Open", tone: "neutral" as const };
+
+              return (
+                <Link
+                  className="card-surface block rounded-[2rem] p-5 transition-transform duration-150 hover:-translate-y-0.5"
+                  data-analytics-event="task_card_click"
+                  data-analytics-location="task_list"
+                  key="social-follow-group"
+                  to={`/${params.eventSlug}/tasks/${firstItem.task.id}`}
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--color-primary)]">
+                        social follow • {card.items.length} platform
+                        {card.items.length === 1 ? "" : "s"} • {totalFollowPoints} point
+                        {totalFollowPoints === 1 ? "" : "s"}
+                      </p>
+                      <h2 className="mt-3 font-display text-2xl font-semibold">
+                        Follow us on socials
+                      </h2>
+                      <p className="mt-2 text-sm leading-6 text-slate-700">
+                        {firstItem.task.description}
+                      </p>
+                    </div>
+                    <div className="flex flex-col items-end gap-2">
+                      <StatusBadge {...groupStatus} />
+                      <span className="text-xs uppercase tracking-[0.14em] text-slate-500">
+                        {verifiedFollowCount}/{card.items.length} verified
+                      </span>
+                    </div>
+                  </div>
+                </Link>
+              );
+            }
+
+            const { attempt, status, task } = card.item;
+
+            return (
+              <Link
+                className="card-surface block rounded-[2rem] p-5 transition-transform duration-150 hover:-translate-y-0.5"
+                data-analytics-attempt-status={attempt?.status ?? "NOT_STARTED"}
+                data-analytics-event="task_card_click"
+                data-analytics-location="task_list"
+                data-analytics-task-status={attempt?.status ?? "NOT_STARTED"}
+                {...Object.fromEntries(
+                  Object.entries(getTaskAnalyticsParams(task)).map(([key, value]) => [
+                    `data-analytics-${key.replace(/_/g, "-")}`,
+                    String(value),
+                  ]),
+                )}
+                key={task.id}
+                to={`/${params.eventSlug}/tasks/${task.id}`}
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--color-primary)]">
+                      {getTaskCategoryLabel(task)} • {task.points} point{task.points === 1 ? "" : "s"}
+                    </p>
+                    <h2 className="mt-3 font-display text-2xl font-semibold">
+                      {task.title}
+                    </h2>
+                    <p className="mt-2 text-sm leading-6 text-slate-700">
+                      {task.description}
+                    </p>
+                  </div>
+                  <div className="flex flex-col items-end gap-2">
+                    <StatusBadge {...status} />
+                    <span className="text-xs uppercase tracking-[0.14em] text-slate-500">
+                      {attempt?.status ?? "NOT_STARTED"}
+                    </span>
+                  </div>
                 </div>
-                <div className="flex flex-col items-end gap-2">
-                  <StatusBadge {...status} />
-                  <span className="text-xs uppercase tracking-[0.14em] text-slate-500">
-                    {attempt?.status ?? "NOT_STARTED"}
-                  </span>
-                </div>
-              </div>
-            </Link>
-          ))}
+              </Link>
+            );
+          })}
         </div>
 
         <Link

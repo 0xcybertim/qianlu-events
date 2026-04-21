@@ -26,7 +26,7 @@ export function AdminShell({
   title,
 }: AdminShellProps) {
   return (
-    <main className="mx-auto min-h-screen w-full max-w-6xl px-4 py-6 sm:px-6 lg:px-8">
+    <main className="min-h-screen w-full px-5 py-6 sm:px-10">
       <header className="flex flex-col gap-5 border-b border-[var(--color-border)] pb-5 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <Link

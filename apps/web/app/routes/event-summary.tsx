@@ -65,7 +65,7 @@ export default function EventSummary({ loaderData, params }: Route.ComponentProp
     <ScreenShell
       eyebrow="Verification summary"
       title="Show this screen to staff"
-      description="This is the participant-facing checkpoint where staff can quickly verify social actions, lead tasks, and booth proofs."
+      description="This is the participant-facing checkpoint where staff can quickly verify social actions, lead activities, and booth proofs."
       marketing={{
         analytics: {
           claimed_points: session.claimedPoints,
@@ -151,7 +151,7 @@ export default function EventSummary({ loaderData, params }: Route.ComponentProp
           <div className="flex items-center justify-between gap-4">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--color-primary)]">
-                Task states
+                Activity states
               </p>
               <h2 className="mt-3 font-display text-2xl font-semibold">
                 Claimed versus verified
@@ -163,10 +163,10 @@ export default function EventSummary({ loaderData, params }: Route.ComponentProp
           </div>
           <div className="mt-4 rounded-2xl bg-white/70 px-4 py-3 text-sm text-slate-700">
             {needsReviewCount > 0
-              ? "There are still tasks waiting for review or automatic verification."
+              ? "There are still activities waiting for review or automatic verification."
               : verifiedCount > 0
-                ? "All reviewed tasks are already reflected below."
-                : "No task has been reviewed yet."}
+                ? "All reviewed activities are already reflected below."
+                : "No activity has been reviewed yet."}
           </div>
           <div className="mt-5 space-y-3">
             {summaryRows.map((row) => (
@@ -198,7 +198,7 @@ export default function EventSummary({ loaderData, params }: Route.ComponentProp
             data-analytics-location="footer"
             to={`/${params.eventSlug}/tasks`}
           >
-            Back to task list
+            Back to activities
           </Link>
         </div>
       </div>

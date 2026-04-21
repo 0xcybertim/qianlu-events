@@ -390,7 +390,7 @@ export default function EventScanCamera({
             data-analytics-location="footer"
             to={`/${params.eventSlug}/tasks`}
           >
-            Back to tasks
+            Back to activities
           </Link>
         </div>
       </div>

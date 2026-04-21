@@ -8,6 +8,7 @@ type ScreenShellProps = {
   title: string;
   description: string;
   children: ReactNode;
+  fixedHeader?: ReactNode;
   marketing?: ParticipantMarketingConfig;
   topContent?: ReactNode;
   style?: CSSProperties;
@@ -19,6 +20,7 @@ export function ScreenShell({
   title,
   description,
   children,
+  fixedHeader,
   marketing,
   style,
   topContent,
@@ -26,11 +28,22 @@ export function ScreenShell({
 }: ScreenShellProps) {
   return (
     <main
-      className={`mx-auto flex min-h-screen w-full flex-col px-5 py-8 ${
+      className={`mx-auto flex min-h-screen w-full flex-col px-5 pb-8 ${
         width === "wide" ? "max-w-3xl" : "max-w-md"
-      }`}
+      } ${fixedHeader ? "pt-24" : "pt-8"}`}
       style={style}
     >
+      {fixedHeader ? (
+        <div className="fixed inset-x-0 top-0 z-50 border-b border-[var(--color-border)] bg-[color:color-mix(in_srgb,var(--color-surface-strong)_96%,white)] px-5 pb-3 pt-[max(env(safe-area-inset-top),0.75rem)] shadow-[0_16px_42px_-32px_rgba(15,109,83,0.45)] backdrop-blur">
+          <div
+            className={`mx-auto flex w-full items-center ${
+              width === "wide" ? "max-w-3xl" : "max-w-md"
+            }`}
+          >
+            {fixedHeader}
+          </div>
+        </div>
+      ) : null}
       {topContent}
       <div className="flex-1">
         <header className="space-y-4">

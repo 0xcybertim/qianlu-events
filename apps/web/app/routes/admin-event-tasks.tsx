@@ -1,6 +1,7 @@
 import { Button, StatusBadge } from "@qianlu-events/ui";
 import { Form, redirect, useNavigation } from "react-router";
 import { type ReactNode, useEffect, useState } from "react";
+import type { FormQuestion, FormQuestionGroup } from "@qianlu-events/schemas";
 
 import type { Route } from "./+types/admin-event-tasks";
 import {
@@ -31,6 +32,7 @@ const taskTypes = [
   "SOCIAL_LIKE",
   "SOCIAL_SHARE",
   "SOCIAL_COMMENT",
+  "SOCIAL_COMMENT_SELF_CLAIM",
   "LEAD_FORM",
   "QUIZ",
   "NEWSLETTER_OPT_IN",
@@ -54,10 +56,46 @@ const verificationTypes = [
   "VISUAL_STAFF_CHECK",
   "STAFF_PIN_CONFIRM",
 ] as const;
+const formQuestionTypes = [
+  "TEXT",
+  "EMAIL",
+  "PHONE",
+  "TEXTAREA",
+  "SINGLE_SELECT",
+  "MULTI_SELECT",
+  "BOOLEAN",
+] as const;
+const formQuestionFieldKeys = [
+  "NONE",
+  "NAME",
+  "EMAIL",
+  "PHONE",
+  "OPT_IN",
+  "CONTACT_METHOD",
+] as const;
 
 type TaskTypeValue = (typeof taskTypes)[number];
 type PlatformValue = (typeof platforms)[number];
 type VerificationTypeValue = (typeof verificationTypes)[number];
+type FormQuestionTypeValue = (typeof formQuestionTypes)[number];
+type FormQuestionFieldKeyValue = (typeof formQuestionFieldKeys)[number];
+type FormQuestionDraft = {
+  allowOther: boolean;
+  fieldKey: FormQuestionFieldKeyValue;
+  helperText: string;
+  id: string;
+  label: string;
+  optionsText: string;
+  required: boolean;
+  showWhenAnswersText: string;
+  showWhenQuestionId: string;
+  type: FormQuestionTypeValue;
+};
+type FormGroupDraft = {
+  id: string;
+  questions: FormQuestionDraft[];
+  title: string;
+};
 
 type TaskTypeGuide = {
   allowedPlatforms: PlatformValue[];
@@ -70,29 +108,31 @@ type TaskTypeGuide = {
   lockRequiresVerification?: boolean;
   lockVerification?: boolean;
   setupSteps: string[];
-  showCommentAutomationOptions?: boolean;
-  showFacebookCommentFields?: boolean;
-  showProofHint?: boolean;
-  showSecondaryLinkFields?: boolean;
-  summary: string;
+    showCommentAutomationOptions?: boolean;
+    showFacebookCommentFields?: boolean;
+    showProofHint?: boolean;
+    showPrimaryLabelField?: boolean;
+    showSecondaryLinkFields?: boolean;
+    summary: string;
 };
 
 const taskTypeGuides: Record<TaskTypeValue, TaskTypeGuide> = {
   SOCIAL_FOLLOW: {
-    allowedPlatforms: ["INSTAGRAM", "FACEBOOK", "TIKTOK", "WHATSAPP"],
+    allowedPlatforms: ["INSTAGRAM", "FACEBOOK", "TIKTOK"],
     allowedVerificationTypes: ["VISUAL_STAFF_CHECK", "STAFF_PIN_CONFIRM", "NONE"],
     defaultPlatform: "INSTAGRAM",
     defaultRequiresVerification: true,
     defaultVerificationType: "VISUAL_STAFF_CHECK",
-    detailHint: "Use this for manual follow tasks on social platforms.",
+    detailHint: "Use this when you want visitors to follow one or more accounts.",
     setupSteps: [
-      "Choose the social platform participants should follow.",
-      "Add the profile URL and a clear button label.",
-      "Tell staff what proof to expect if manual verification is needed.",
+      "Choose the social platforms participants can follow.",
+      "Add the account or page link for each selected platform.",
+      "Choose whether this is optimistic or checked by staff.",
     ],
-    showProofHint: true,
+    showProofHint: false,
+    showPrimaryLabelField: false,
     showSecondaryLinkFields: false,
-    summary: "Participants open a profile, follow it, and return for manual or staff-assisted verification.",
+    summary: "Visitors open the account, follow it, and return to claim points.",
   },
   SOCIAL_LIKE: {
     allowedPlatforms: ["INSTAGRAM", "FACEBOOK", "TIKTOK"],
@@ -146,6 +186,23 @@ const taskTypeGuides: Record<TaskTypeValue, TaskTypeGuide> = {
     showProofHint: false,
     showSecondaryLinkFields: false,
     summary: "Participants comment a generated code on a Facebook or Instagram post and the system verifies it automatically through the webhook/API flow.",
+  },
+  SOCIAL_COMMENT_SELF_CLAIM: {
+    allowedPlatforms: ["INSTAGRAM", "FACEBOOK"],
+    allowedVerificationTypes: ["NONE", "VISUAL_STAFF_CHECK", "STAFF_PIN_CONFIRM"],
+    defaultPlatform: "INSTAGRAM",
+    defaultRequiresVerification: false,
+    defaultVerificationType: "NONE",
+    detailHint: "Use this for natural comments where participants self-claim the action after opening the post.",
+    setupSteps: [
+      "Choose Instagram or Facebook.",
+      "Paste the post URL participants should open.",
+      "Write instructions that ask for a real comment, not a tracking code.",
+      "Keep verification off if this is only for raffle weighting.",
+    ],
+    showProofHint: true,
+    showSecondaryLinkFields: false,
+    summary: "Participants open a social post, leave a natural comment, and self-claim the task. No public tracking code is required.",
   },
   LEAD_FORM: {
     allowedPlatforms: ["EMAIL"],
@@ -266,6 +323,192 @@ const taskTypeGuides: Record<TaskTypeValue, TaskTypeGuide> = {
   },
 };
 
+function taskSupportsQuestionnaire(type: string) {
+  return [
+    "LEAD_FORM",
+    "QUIZ",
+    "NEWSLETTER_OPT_IN",
+    "WHATSAPP_OPT_IN",
+  ].includes(type);
+}
+
+function buildDefaultFormQuestions(taskType: TaskTypeValue): FormQuestion[] {
+  switch (taskType) {
+    case "LEAD_FORM":
+      return [
+        {
+          id: "name",
+          label: "Name",
+          type: "TEXT",
+          required: true,
+          fieldKey: "NAME",
+        },
+        {
+          id: "email",
+          label: "Email",
+          type: "EMAIL",
+          required: true,
+          fieldKey: "EMAIL",
+        },
+        {
+          id: "opt-in",
+          label: "Keep me informed about future events and offers.",
+          type: "BOOLEAN",
+          fieldKey: "OPT_IN",
+        },
+      ];
+    case "QUIZ":
+      return [
+        { id: "question-1", label: "Question 1", type: "TEXT", required: true },
+        { id: "question-2", label: "Question 2", type: "TEXT", required: true },
+        { id: "question-3", label: "Question 3", type: "TEXT", required: true },
+      ];
+    case "NEWSLETTER_OPT_IN":
+      return [
+        {
+          id: "opt-in",
+          label: "I want to receive campaign and event updates.",
+          type: "BOOLEAN",
+          required: true,
+          fieldKey: "OPT_IN",
+        },
+      ];
+    case "WHATSAPP_OPT_IN":
+      return [
+        {
+          id: "phone",
+          label: "Phone number",
+          type: "PHONE",
+          required: true,
+          fieldKey: "PHONE",
+        },
+      ];
+    default:
+      return [];
+  }
+}
+
+function toQuestionDraft(question: FormQuestion): FormQuestionDraft {
+  return {
+    allowOther: question.allowOther ?? false,
+    fieldKey: question.fieldKey ?? "NONE",
+    helperText: question.helperText ?? "",
+    id: question.id,
+    label: question.label,
+    optionsText: question.options?.join("\n") ?? "",
+    required: question.required ?? false,
+    showWhenAnswersText: question.showWhen?.answers.join("\n") ?? "",
+    showWhenQuestionId: question.showWhen?.questionId ?? "",
+    type: question.type,
+  };
+}
+
+function createQuestionDrafts(taskType: TaskTypeValue, questions?: FormQuestion[] | null) {
+  const sourceQuestions =
+    questions && questions.length > 0
+      ? questions
+      : buildDefaultFormQuestions(taskType);
+
+  return sourceQuestions.map(toQuestionDraft);
+}
+
+function serializeQuestionDrafts(drafts: FormQuestionDraft[]) {
+  return drafts
+    .map((draft, index) => {
+      const label = draft.label.trim();
+
+      if (!label) {
+        return null;
+      }
+
+      const options = draft.optionsText
+        .split("\n")
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+
+      const question: FormQuestion = {
+        id: draft.id || `question-${index + 1}`,
+        label,
+        type: draft.type,
+        required: draft.required || undefined,
+        helperText: draft.helperText.trim() || undefined,
+        options:
+          draft.type === "SINGLE_SELECT" || draft.type === "MULTI_SELECT"
+            ? options
+            : undefined,
+        allowOther:
+          draft.type === "SINGLE_SELECT" || draft.type === "MULTI_SELECT"
+            ? draft.allowOther || undefined
+            : undefined,
+        fieldKey: draft.fieldKey === "NONE" ? undefined : draft.fieldKey,
+        showWhen:
+          draft.showWhenQuestionId.trim() && draft.showWhenAnswersText.trim()
+            ? {
+                questionId: draft.showWhenQuestionId.trim(),
+                answers: draft.showWhenAnswersText
+                  .split("\n")
+                  .map((entry) => entry.trim())
+                  .filter(Boolean),
+              }
+            : undefined,
+      };
+
+      return question;
+    })
+    .filter((draft): draft is FormQuestion => draft !== null);
+}
+
+function createEmptyQuestionDraft(index: number): FormQuestionDraft {
+  return {
+    allowOther: false,
+    fieldKey: "NONE",
+    helperText: "",
+    id: `question-${index + 1}-${Math.random().toString(36).slice(2, 8)}`,
+    label: "",
+    optionsText: "",
+    required: false,
+    showWhenAnswersText: "",
+    showWhenQuestionId: "",
+    type: "TEXT",
+  };
+}
+
+function createGroupDrafts(groups?: FormQuestionGroup[] | null) {
+  return (groups ?? []).map((group) => ({
+    id: group.id,
+    title: group.title,
+    questions: group.questions.map(toQuestionDraft),
+  }));
+}
+
+function serializeGroupDrafts(groups: FormGroupDraft[]) {
+  return groups
+    .map((group) => {
+      const title = group.title.trim();
+
+      if (!title) {
+        return null;
+      }
+
+      const questions = serializeQuestionDrafts(group.questions);
+
+      return {
+        id: group.id,
+        title,
+        questions,
+      } satisfies FormQuestionGroup;
+    })
+    .filter((group): group is FormQuestionGroup => group !== null);
+}
+
+function createEmptyGroupDraft(index: number): FormGroupDraft {
+  return {
+    id: `group-${index + 1}-${Math.random().toString(36).slice(2, 8)}`,
+    questions: [],
+    title: "",
+  };
+}
+
 function getTaskTypeGuide(type: string) {
   return taskTypeGuides[(taskTypes.includes(type as TaskTypeValue)
     ? type
@@ -273,11 +516,180 @@ function getTaskTypeGuide(type: string) {
 }
 
 function formatEnumLabel(value: string) {
+  const labels: Record<string, string> = {
+    SOCIAL_COMMENT: "Tracked comment",
+    SOCIAL_COMMENT_SELF_CLAIM: "Natural comment",
+  };
+
+  if (labels[value]) {
+    return labels[value];
+  }
+
   return value
     .toLowerCase()
     .split("_")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+const verificationModeOptions = [
+  {
+    description: "Trust the participant. Points count when they tap completed.",
+    label: "Optimistic",
+    requiresVerification: false,
+    value: "NONE",
+  },
+  {
+    description: "Staff quickly checks the phone or proof before it counts.",
+    label: "Staff visual check",
+    requiresVerification: true,
+    value: "VISUAL_STAFF_CHECK",
+  },
+  {
+    description: "Staff confirms with the protected PIN flow.",
+    label: "Staff PIN confirm",
+    requiresVerification: true,
+    value: "STAFF_PIN_CONFIRM",
+  },
+] as const;
+
+function getDefaultSocialFollowTitle() {
+  return "Follow us on socials";
+}
+
+function getPrimaryUrlLabel(type: string) {
+  switch (type) {
+    case "SOCIAL_FOLLOW":
+      return "Account / page link";
+    case "SOCIAL_LIKE":
+    case "SOCIAL_COMMENT_SELF_CLAIM":
+      return "Post link";
+    case "SOCIAL_SHARE":
+      return "Post / share link";
+    case "WHATSAPP_OPT_IN":
+      return "WhatsApp link";
+    default:
+      return "Link";
+  }
+}
+
+function PlatformIcon({ platform }: { platform: PlatformValue }) {
+  if (platform === "INSTAGRAM") {
+    return (
+      <svg aria-hidden="true" className="size-7" viewBox="0 0 24 24">
+        <rect
+          fill="none"
+          height="16"
+          rx="5"
+          stroke="currentColor"
+          strokeWidth="2"
+          width="16"
+          x="4"
+          y="4"
+        />
+        <circle cx="12" cy="12" fill="none" r="3.5" stroke="currentColor" strokeWidth="2" />
+        <circle cx="17" cy="7" fill="currentColor" r="1.2" />
+      </svg>
+    );
+  }
+
+  if (platform === "FACEBOOK") {
+    return (
+      <span aria-hidden="true" className="font-display text-3xl font-semibold leading-none">
+        f
+      </span>
+    );
+  }
+
+  if (platform === "TIKTOK") {
+    return (
+      <svg aria-hidden="true" className="size-7" viewBox="0 0 24 24">
+        <path
+          d="M14 4v10.2a4.2 4.2 0 1 1-3.4-4.1"
+          fill="none"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="2.2"
+        />
+        <path
+          d="M14 4c1 2.7 2.8 4.2 5 4.6"
+          fill="none"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeWidth="2.2"
+        />
+      </svg>
+    );
+  }
+
+  if (platform === "WHATSAPP") {
+    return (
+      <svg aria-hidden="true" className="size-7" viewBox="0 0 24 24">
+        <path
+          d="M5.5 19 6.7 15.8A7.5 7.5 0 1 1 9 18.1L5.5 19Z"
+          fill="none"
+          stroke="currentColor"
+          strokeLinejoin="round"
+          strokeWidth="2"
+        />
+        <path
+          d="M9.5 8.5c.7 2.4 2.1 4 4 4.8l1.1-1.1 2 1.5c-.4 1.3-1.3 2-2.6 2-3.2-.2-6.5-3.4-6.7-6.7 0-1.3.7-2.2 2-2.6l1.2 2.1Z"
+          fill="none"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="1.5"
+        />
+      </svg>
+    );
+  }
+
+  if (platform === "EMAIL") {
+    return (
+      <svg aria-hidden="true" className="size-7" viewBox="0 0 24 24">
+        <rect
+          fill="none"
+          height="14"
+          rx="3"
+          stroke="currentColor"
+          strokeWidth="2"
+          width="18"
+          x="3"
+          y="5"
+        />
+        <path
+          d="m4.5 7 7.5 6 7.5-6"
+          fill="none"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="2"
+        />
+      </svg>
+    );
+  }
+
+  if (platform === "IN_PERSON") {
+    return (
+      <svg aria-hidden="true" className="size-7" viewBox="0 0 24 24">
+        <path
+          d="M12 21s6-5.3 6-11a6 6 0 0 0-12 0c0 5.7 6 11 6 11Z"
+          fill="none"
+          stroke="currentColor"
+          strokeLinejoin="round"
+          strokeWidth="2"
+        />
+        <circle cx="12" cy="10" fill="none" r="2" stroke="currentColor" strokeWidth="2" />
+      </svg>
+    );
+  }
+
+  return (
+    <span aria-hidden="true" className="font-display text-3xl font-semibold leading-none">
+      -
+    </span>
+  );
 }
 
 function formatTaskPointsLabel(points: number) {
@@ -952,6 +1364,36 @@ function parseTaskForm(formData: FormData) {
     platform === "FACEBOOK" || platform === "INSTAGRAM"
   );
   const primaryLabel = readOptional(formData, "primaryLabel");
+  const formQuestionsJson = readOptional(formData, "formQuestionsJson");
+  const formGroupsJson = readOptional(formData, "formGroupsJson");
+  const formGroupIntroLabel = readOptional(formData, "formGroupIntroLabel");
+  let formQuestions: FormQuestion[] | undefined;
+  let formGroups: FormQuestionGroup[] | undefined;
+
+  if (formQuestionsJson) {
+    try {
+      const parsed = JSON.parse(formQuestionsJson);
+
+      if (Array.isArray(parsed)) {
+        formQuestions = parsed as FormQuestion[];
+      }
+    } catch {
+      formQuestions = undefined;
+    }
+  }
+
+  if (formGroupsJson) {
+    try {
+      const parsed = JSON.parse(formGroupsJson);
+
+      if (Array.isArray(parsed)) {
+        formGroups = parsed as FormQuestionGroup[];
+      }
+    } catch {
+      formGroups = undefined;
+    }
+  }
+
   const configJson = {
     primaryUrl: readOptional(formData, "primaryUrl"),
     secondaryUrl: readOptional(formData, "secondaryUrl"),
@@ -975,6 +1417,18 @@ function parseTaskForm(formData: FormData) {
       : formData.get("hasAutoVerify")
         ? formData.get("autoVerify") === "on"
         : undefined,
+    formQuestions:
+      taskSupportsQuestionnaire(type) && formQuestions && formQuestions.length > 0
+        ? formQuestions
+        : undefined,
+    formGroupIntroLabel:
+      taskSupportsQuestionnaire(type) && formGroups && formGroups.length > 0
+        ? formGroupIntroLabel
+        : undefined,
+    formGroups:
+      taskSupportsQuestionnaire(type) && formGroups && formGroups.length > 0
+        ? formGroups
+        : undefined,
   };
   const compactConfig = Object.fromEntries(
     Object.entries(configJson).filter(
@@ -996,6 +1450,50 @@ function parseTaskForm(formData: FormData) {
     instagramSourceAccountId: readOptional(formData, "instagramSourceAccountId"),
     configJson: Object.keys(compactConfig).length > 0 ? compactConfig : null,
   };
+}
+
+function parseTaskCreateForms(formData: FormData) {
+  const baseTask = parseTaskForm(formData);
+
+  if (baseTask.type !== "SOCIAL_FOLLOW") {
+    return [baseTask];
+  }
+
+  const selectedPlatforms = formData
+    .getAll("socialFollowPlatform")
+    .map((value) => value.toString())
+    .filter((value): value is PlatformValue =>
+      platforms.includes(value as PlatformValue),
+    );
+
+  if (selectedPlatforms.length === 0) {
+    return [baseTask];
+  }
+
+  return selectedPlatforms.map((platform, index) => {
+    const platformLabel = formatEnumLabel(platform);
+    const profileUrl = readOptional(formData, `socialFollowUrl:${platform}`);
+    const configJson = {
+      ...(baseTask.configJson ?? {}),
+      primaryUrl: profileUrl,
+      primaryLabel:
+        baseTask.configJson?.primaryLabel || `Open ${platformLabel}`,
+    };
+    const compactConfig = Object.fromEntries(
+      Object.entries(configJson).filter(
+        ([, value]) => value !== undefined && value !== "",
+      ),
+    );
+
+    return {
+      ...baseTask,
+      configJson: Object.keys(compactConfig).length > 0 ? compactConfig : null,
+      isActive: true,
+      platform,
+      sortOrder: baseTask.sortOrder + index,
+      title: getDefaultSocialFollowTitle(),
+    };
+  });
 }
 
 function extractActionErrorMessage(error: unknown) {
@@ -1069,11 +1567,15 @@ export async function action({ params, request }: Route.ActionArgs) {
 
   try {
     if (intent === "create") {
-      await createAdminTask(params.eventSlug, parseTaskForm(formData), request);
+      const tasks = parseTaskCreateForms(formData);
+
+      for (const task of tasks) {
+        await createAdminTask(params.eventSlug, task, request);
+      }
 
       return {
         formKey,
-        success: "Task created.",
+        success: tasks.length === 1 ? "Task created." : `${tasks.length} tasks created.`,
       };
     }
 
@@ -1119,16 +1621,67 @@ export async function action({ params, request }: Route.ActionArgs) {
     }
 
     if (intent === "update" && taskId) {
+      const tasks = parseTaskCreateForms(formData);
+      const [primaryTask, ...extraTasks] = tasks;
+      const isSocialFollowSync = primaryTask?.type === "SOCIAL_FOLLOW";
+      const event =
+        isSocialFollowSync
+          ? await fetchAdminEvent(params.eventSlug, request)
+          : null;
+      const existingFollowTaskByPlatform = new Map(
+        (event?.tasks ?? [])
+          .filter(
+            (entry) => entry.id !== taskId && entry.type === "SOCIAL_FOLLOW",
+          )
+          .map((entry) => [entry.platform, entry.id]),
+      );
+
       await updateAdminTask(
         params.eventSlug,
         taskId,
-        parseTaskForm(formData),
+        primaryTask ?? parseTaskForm(formData),
         request,
       );
 
+      for (const task of extraTasks) {
+        const existingTaskId = existingFollowTaskByPlatform.get(
+          task.platform as PlatformValue,
+        );
+
+        if (existingTaskId) {
+          await updateAdminTask(params.eventSlug, existingTaskId, task, request);
+        } else {
+          await createAdminTask(params.eventSlug, task, request);
+        }
+      }
+
+      if (isSocialFollowSync && event) {
+        const selectedFollowPlatforms = new Set(
+          tasks.map((task) => task.platform),
+        );
+        const deselectedFollowTasks = event.tasks.filter(
+          (entry) =>
+            entry.id !== taskId &&
+            entry.type === "SOCIAL_FOLLOW" &&
+            !selectedFollowPlatforms.has(entry.platform),
+        );
+
+        for (const task of deselectedFollowTasks) {
+          await updateAdminTask(
+            params.eventSlug,
+            task.id,
+            { isActive: false },
+            request,
+          );
+        }
+      }
+
       return {
         formKey,
-        success: "Task saved.",
+        success:
+          extraTasks.length === 0
+            ? "Task saved."
+            : `${tasks.length} follow tasks saved.`,
       };
     }
 
@@ -1188,10 +1741,13 @@ function TaskForm({
   buttonLabel: string;
   eventTasks: Array<{
     configJson?: {
+      primaryUrl?: string;
       requiredPrefix?: string;
     } | null;
     id: string;
+    platform: string;
     title: string;
+    type: string;
   }>;
   facebookPostOptions: {
     error: string | null;
@@ -1247,6 +1803,9 @@ function TaskForm({
       instagramMediaId?: string;
       requireVerificationCode?: boolean;
       autoVerify?: boolean;
+      formQuestions?: FormQuestion[];
+      formGroupIntroLabel?: string;
+      formGroups?: FormQuestionGroup[];
     } | null;
   };
 }) {
@@ -1255,9 +1814,57 @@ function TaskForm({
   const formKey = task ? `task-${task.id}` : "task-create";
   const initialGuide = getTaskTypeGuide(initialType);
   const [selectedType, setSelectedType] = useState(initialType);
+  const initialQuestionDrafts = taskSupportsQuestionnaire(initialType)
+    ? createQuestionDrafts(
+        initialType as TaskTypeValue,
+        task?.configJson?.formQuestions,
+      )
+    : [];
+  const initialGroupDrafts = taskSupportsQuestionnaire(initialType)
+    ? createGroupDrafts(task?.configJson?.formGroups)
+    : [];
+  const existingSocialFollowTasks =
+    intent === "update" && initialType === "SOCIAL_FOLLOW"
+      ? eventTasks.filter((entry) => entry.type === "SOCIAL_FOLLOW")
+      : [];
   const currentGuide = getTaskTypeGuide(selectedType);
   const [selectedPlatform, setSelectedPlatform] = useState(
     task?.platform ?? initialGuide.defaultPlatform,
+  );
+  const [selectedFollowPlatforms, setSelectedFollowPlatforms] = useState<
+    PlatformValue[]
+  >(() => {
+    const initialPlatform = platforms.includes(
+      (task?.platform ?? initialGuide.defaultPlatform) as PlatformValue,
+    )
+      ? ((task?.platform ?? initialGuide.defaultPlatform) as PlatformValue)
+      : initialGuide.defaultPlatform;
+    const existingPlatforms = existingSocialFollowTasks
+      .map((entry) => entry.platform)
+      .filter((platform): platform is PlatformValue =>
+        platforms.includes(platform as PlatformValue),
+      );
+    const uniquePlatforms = Array.from(
+      new Set([initialPlatform, ...existingPlatforms]),
+    );
+
+    return uniquePlatforms.length > 0 ? uniquePlatforms : [initialPlatform];
+  });
+  const [socialFollowUrls, setSocialFollowUrls] = useState<
+    Record<PlatformValue, string>
+  >(() =>
+    platforms.reduce(
+      (urls, platform) => ({
+        ...urls,
+        [platform]:
+          task?.type === "SOCIAL_FOLLOW" && task.platform === platform
+            ? (task.configJson?.primaryUrl ?? "")
+            : (existingSocialFollowTasks.find(
+                (entry) => entry.platform === platform,
+              )?.configJson?.primaryUrl ?? ""),
+      }),
+      {} as Record<PlatformValue, string>,
+    ),
   );
   const [selectedVerificationType, setSelectedVerificationType] = useState(
     task?.verificationType ?? initialGuide.defaultVerificationType,
@@ -1265,6 +1872,12 @@ function TaskForm({
   const [requiresVerification, setRequiresVerification] = useState(
     task?.requiresVerification ?? initialGuide.defaultRequiresVerification,
   );
+  const [points, setPoints] = useState(task?.points ?? 1);
+  const [formQuestions, setFormQuestions] = useState(initialQuestionDrafts);
+  const [formGroupIntroLabel, setFormGroupIntroLabel] = useState(
+    task?.configJson?.formGroupIntroLabel ?? "Could this be interesting for you?",
+  );
+  const [formGroups, setFormGroups] = useState(initialGroupDrafts);
 
   const availablePlatforms = currentGuide.lockPlatform
     ? [currentGuide.defaultPlatform]
@@ -1350,14 +1963,54 @@ function TaskForm({
     activeFormKey === formKey && navigation.state !== "idle";
   const isCurrentFormResult =
     actionData?.formKey === formKey && (actionData.success || actionData.error);
+  const supportsQuestionnaire = taskSupportsQuestionnaire(selectedType);
+  const serializedFormQuestions = serializeQuestionDrafts(formQuestions);
+  const serializedFormGroups = serializeGroupDrafts(formGroups);
+  const supportsMultiPlatformFollow = selectedType === "SOCIAL_FOLLOW";
+  const primarySelectedPlatform = supportsMultiPlatformFollow
+    ? (selectedFollowPlatforms[0] ?? selectedPlatform)
+    : selectedPlatform;
 
   function handleTypeChange(nextType: string) {
     const nextGuide = getTaskTypeGuide(nextType);
 
     setSelectedType(nextType);
     setSelectedPlatform(nextGuide.defaultPlatform);
+    setSelectedFollowPlatforms([nextGuide.defaultPlatform]);
     setSelectedVerificationType(nextGuide.defaultVerificationType);
     setRequiresVerification(nextGuide.defaultRequiresVerification);
+    setPoints(1);
+    setFormQuestions(
+      taskSupportsQuestionnaire(nextType)
+        ? createQuestionDrafts(nextType as TaskTypeValue)
+        : [],
+    );
+    setFormGroups([]);
+    setFormGroupIntroLabel("Could this be interesting for you?");
+  }
+
+  function handlePlatformSelect(platform: PlatformValue) {
+    if (!supportsMultiPlatformFollow) {
+      setSelectedPlatform(platform);
+      return;
+    }
+
+    const isSelected = selectedFollowPlatforms.includes(platform);
+    const nextPlatforms = isSelected
+      ? selectedFollowPlatforms.length > 1
+        ? selectedFollowPlatforms.filter((entry) => entry !== platform)
+        : selectedFollowPlatforms
+      : [...selectedFollowPlatforms, platform];
+
+    setSelectedFollowPlatforms(nextPlatforms);
+    setSelectedPlatform(nextPlatforms[0] ?? platform);
+  }
+
+  function handleSocialFollowUrlChange(platform: PlatformValue, value: string) {
+    setSocialFollowUrls((currentUrls) => ({
+      ...currentUrls,
+      [platform]: value,
+    }));
   }
 
   function handleFacebookPostSelect(nextPostId: string) {
@@ -1399,11 +2052,56 @@ function TaskForm({
     setInstagramPrimaryUrlValue(selectedMedia?.permalink ?? "");
   }
 
+  function updateQuestion(
+    questionId: string,
+    updater: (draft: FormQuestionDraft) => FormQuestionDraft,
+  ) {
+    setFormQuestions((currentQuestions) =>
+      currentQuestions.map((question) =>
+        question.id === questionId ? updater(question) : question,
+      ),
+    );
+  }
+
+  function updateGroupQuestion(
+    groupId: string,
+    questionId: string,
+    updater: (draft: FormQuestionDraft) => FormQuestionDraft,
+  ) {
+    setFormGroups((currentGroups) =>
+      currentGroups.map((group) =>
+        group.id === groupId
+          ? {
+              ...group,
+              questions: group.questions.map((question) =>
+                question.id === questionId ? updater(question) : question,
+              ),
+            }
+          : group,
+      ),
+    );
+  }
+
   return (
-    <Form className="space-y-4" method="post">
+    <Form className="space-y-4 pb-32" method="post">
       <input name="formKey" type="hidden" value={formKey} />
       <input name="intent" type="hidden" value={intent} />
       {task ? <input name="taskId" type="hidden" value={task.id} /> : null}
+      <input name="sortOrder" type="hidden" value={task?.sortOrder ?? 0} />
+      {supportsQuestionnaire ? (
+        <input
+          name="formQuestionsJson"
+          type="hidden"
+          value={JSON.stringify(serializedFormQuestions)}
+        />
+      ) : null}
+      {supportsQuestionnaire ? (
+        <input
+          name="formGroupsJson"
+          type="hidden"
+          value={JSON.stringify(serializedFormGroups)}
+        />
+      ) : null}
       {shouldSimplifySocialCommentForm ? (
         <>
           <input
@@ -1411,7 +2109,6 @@ function TaskForm({
             type="hidden"
             value={task?.isActive === false ? "" : "on"}
           />
-          <input name="sortOrder" type="hidden" value={task?.sortOrder ?? 0} />
           <input name="hasRequireVerificationCode" type="hidden" value="1" />
           <input name="requireVerificationCode" type="hidden" value="on" />
           <input name="hasAutoVerify" type="hidden" value="1" />
@@ -1422,7 +2119,7 @@ function TaskForm({
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
           1. Choose task type
         </p>
-        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+        <div className="mt-4">
           <AdminField label="Task type">
             <select
               className={adminInputClass}
@@ -1437,39 +2134,101 @@ function TaskForm({
               ))}
             </select>
           </AdminField>
+        </div>
+        <div className="mt-4 grid gap-3 lg:grid-cols-[2fr_1fr]">
           <AdminField label="Platform">
-            {currentGuide.lockPlatform ? (
-              <>
-                <input name="platform" type="hidden" value={selectedPlatform} />
-                <input
-                  className={adminInputClass}
-                  disabled
-                  value={formatEnumLabel(selectedPlatform)}
-                />
-              </>
-            ) : (
-              <select
-                className={adminInputClass}
-                name="platform"
-                onChange={(event) => setSelectedPlatform(event.target.value)}
-                value={selectedPlatform}
-              >
-                {availablePlatforms.map((platform) => (
-                  <option key={platform} value={platform}>
-                    {formatEnumLabel(platform)}
-                  </option>
-                ))}
-              </select>
-            )}
+            <input name="platform" type="hidden" value={primarySelectedPlatform} />
+            {supportsMultiPlatformFollow
+              ? selectedFollowPlatforms.map((platform) => (
+                  <input
+                    key={platform}
+                    name="socialFollowPlatform"
+                    type="hidden"
+                    value={platform}
+                  />
+                ))
+              : null}
+            <div className="grid gap-2 sm:grid-cols-2">
+              {availablePlatforms.map((platform) => {
+                const isSelected = supportsMultiPlatformFollow
+                  ? selectedFollowPlatforms.includes(platform)
+                  : selectedPlatform === platform;
+
+                return (
+                  <button
+                    className={[
+                      "min-h-24 rounded-2xl border p-4 text-left transition-colors",
+                      isSelected
+                        ? "border-[var(--color-primary)] bg-[var(--color-primary)] text-[var(--color-primary-contrast)]"
+                        : "border-[var(--color-border)] bg-white text-slate-800",
+                      currentGuide.lockPlatform
+                        ? "cursor-default"
+                        : "hover:border-[var(--color-primary)]",
+                    ].join(" ")}
+                    disabled={currentGuide.lockPlatform}
+                    key={platform}
+                    onClick={() => handlePlatformSelect(platform)}
+                    type="button"
+                  >
+                    <span className="flex items-center gap-3">
+                      <span
+                        className={[
+                          "flex size-11 items-center justify-center rounded-2xl",
+                          isSelected
+                            ? "bg-white/15"
+                            : "bg-[var(--color-surface-strong)]",
+                        ].join(" ")}
+                      >
+                        <PlatformIcon platform={platform} />
+                      </span>
+                      <span className="font-semibold">
+                        {formatEnumLabel(platform)}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </AdminField>
-          <AdminField label="Points">
-            <input
-              className={adminInputClass}
-              defaultValue={task?.points ?? 1}
-              min={0}
-              name="points"
-              type="number"
-            />
+          <AdminField
+            label={selectedType === "SOCIAL_FOLLOW" ? "Points per follow" : "Points"}
+          >
+            <div className="grid grid-cols-[auto_auto_1fr_auto_auto] items-stretch gap-2">
+              {[-10, -1].map((delta) => (
+                <button
+                  className="min-h-14 rounded-2xl border border-[var(--color-border)] bg-white px-4 text-base font-semibold text-slate-900 transition-colors hover:border-[var(--color-primary)]"
+                  key={delta}
+                  onClick={() =>
+                    setPoints((currentPoints) => Math.max(0, currentPoints + delta))
+                  }
+                  type="button"
+                >
+                  {delta}
+                </button>
+              ))}
+              <input
+                className="min-h-14 w-full rounded-2xl border border-[var(--color-border)] bg-white px-4 text-center font-display text-3xl font-semibold text-slate-950 outline-none ring-[var(--color-primary)] focus:ring-2"
+                min={0}
+                name="points"
+                onChange={(event) =>
+                  setPoints(Math.max(0, Number(event.target.value) || 0))
+                }
+                type="number"
+                value={points}
+              />
+              {[1, 10].map((delta) => (
+                <button
+                  className="min-h-14 rounded-2xl border border-[var(--color-border)] bg-white px-4 text-base font-semibold text-slate-900 transition-colors hover:border-[var(--color-primary)]"
+                  key={delta}
+                  onClick={() =>
+                    setPoints((currentPoints) => Math.max(0, currentPoints + delta))
+                  }
+                  type="button"
+                >
+                  +{delta}
+                </button>
+              ))}
+            </div>
           </AdminField>
         </div>
         {!shouldSimplifySocialCommentForm ? (
@@ -1478,50 +2237,72 @@ function TaskForm({
               {formatEnumLabel(selectedType)}
             </p>
             <p className="mt-2">{currentGuide.summary}</p>
-            <p className="mt-3 text-xs uppercase tracking-[0.14em] text-slate-500">
-              {currentGuide.detailHint}
-            </p>
           </div>
         ) : null}
       </div>
 
-      {!shouldSimplifySocialCommentForm ? (
+      {!shouldSimplifySocialCommentForm && selectedType !== "SOCIAL_FOLLOW" ? (
         <div className="rounded-2xl bg-white/70 p-4">
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-            2. Review setup
+            2. Completion mode
           </p>
-          <div className="mt-4 grid gap-3 sm:grid-cols-3">
-            <AdminField label="Verification type">
-              {currentGuide.lockVerification ? (
-                <>
-                  <input
-                    name="verificationType"
-                    type="hidden"
-                    value={selectedVerificationType}
-                  />
-                  <input
-                    className={adminInputClass}
-                    disabled
-                    value={formatEnumLabel(selectedVerificationType)}
-                  />
-                </>
-              ) : (
-                <select
-                  className={adminInputClass}
-                  name="verificationType"
-                  onChange={(event) =>
-                    setSelectedVerificationType(event.target.value)
-                  }
-                  value={selectedVerificationType}
-                >
-                  {availableVerificationTypes.map((type) => (
-                    <option key={type} value={type}>
-                      {formatEnumLabel(type)}
-                    </option>
-                  ))}
-                </select>
-              )}
-            </AdminField>
+          <input
+            name="requiresVerification"
+            type="hidden"
+            value={requiresVerification ? "on" : ""}
+          />
+          <input
+            name="verificationType"
+            type="hidden"
+            value={selectedVerificationType}
+          />
+          <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_auto]">
+            <div className="grid gap-3 sm:grid-cols-3">
+              {verificationModeOptions
+                .filter((option) =>
+                  currentGuide.lockVerification
+                    ? option.value === selectedVerificationType
+                    : availableVerificationTypes.includes(option.value),
+                )
+                .map((option) => {
+                  const isSelected = selectedVerificationType === option.value;
+
+                  return (
+                    <button
+                      className={[
+                        "min-h-32 rounded-2xl border p-4 text-left transition-colors",
+                        isSelected
+                          ? "border-[var(--color-primary)] bg-[var(--color-primary)] text-[var(--color-primary-contrast)]"
+                          : "border-[var(--color-border)] bg-white text-slate-800",
+                        currentGuide.lockVerification
+                          ? "cursor-default"
+                          : "hover:border-[var(--color-primary)]",
+                      ].join(" ")}
+                      disabled={currentGuide.lockVerification}
+                      key={option.value}
+                      onClick={() => {
+                        setSelectedVerificationType(option.value);
+                        setRequiresVerification(option.requiresVerification);
+                      }}
+                      type="button"
+                    >
+                      <span className="block text-base font-semibold">
+                        {option.label}
+                      </span>
+                      <span
+                        className={[
+                          "mt-3 block text-sm leading-6",
+                          isSelected
+                            ? "text-[color:color-mix(in_srgb,var(--color-primary-contrast)_84%,transparent)]"
+                            : "text-slate-600",
+                        ].join(" ")}
+                      >
+                        {option.description}
+                      </span>
+                    </button>
+                  );
+                })}
+            </div>
             <label className="flex items-center gap-3 rounded-lg bg-white px-3 py-2 text-sm">
               <input
                 defaultChecked={task?.isActive ?? true}
@@ -1529,29 +2310,6 @@ function TaskForm({
                 type="checkbox"
               />
               Active
-            </label>
-            <label className="flex items-center gap-3 rounded-lg bg-white px-3 py-2 text-sm">
-              {currentGuide.lockRequiresVerification ? (
-                <input
-                  name="requiresVerification"
-                  type="hidden"
-                  value={requiresVerification ? "on" : ""}
-                />
-              ) : null}
-              <input
-                checked={requiresVerification}
-                disabled={currentGuide.lockRequiresVerification}
-                name={
-                  currentGuide.lockRequiresVerification
-                    ? undefined
-                    : "requiresVerification"
-                }
-                onChange={(event) =>
-                  setRequiresVerification(event.target.checked)
-                }
-                type="checkbox"
-              />
-              Requires verification
             </label>
           </div>
         </div>
@@ -1574,27 +2332,25 @@ function TaskForm({
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
           3. Participant-facing copy
         </p>
-        <div className="mt-4 grid gap-3 sm:grid-cols-2">
-          <AdminField label="Title">
-            <input
-              className={adminInputClass}
-              defaultValue={task?.title ?? ""}
-              name="title"
-              required
-            />
-          </AdminField>
-          {!shouldSimplifySocialCommentForm ? (
-            <AdminField label="Sort order">
+        {supportsMultiPlatformFollow ? (
+          <input
+            name="title"
+            type="hidden"
+            value={getDefaultSocialFollowTitle()}
+          />
+        ) : (
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <AdminField label="Title">
               <input
                 className={adminInputClass}
-                defaultValue={task?.sortOrder ?? 0}
-                name="sortOrder"
-                type="number"
+                defaultValue={task?.title ?? ""}
+                name="title"
+                required
               />
             </AdminField>
-          ) : null}
-        </div>
-        <div className="mt-3">
+          </div>
+        )}
+        <div className={supportsMultiPlatformFollow ? "mt-4" : "mt-3"}>
           <AdminField label="Description">
             <textarea
               className={adminInputClass}
@@ -1624,8 +2380,27 @@ function TaskForm({
       ) : null}
 
       <div className="grid gap-3 sm:grid-cols-2">
-        {!currentGuide.showFacebookCommentFields ? (
-          <AdminField label="Primary URL">
+        {supportsMultiPlatformFollow
+          ? selectedFollowPlatforms.map((platform) => (
+              <AdminField
+                key={platform}
+                label={`${formatEnumLabel(platform)} account / page link`}
+              >
+                <input
+                  className={adminInputClass}
+                  name={`socialFollowUrl:${platform}`}
+                  onChange={(event) =>
+                    handleSocialFollowUrlChange(platform, event.target.value)
+                  }
+                  required
+                  type="url"
+                  value={socialFollowUrls[platform]}
+                />
+              </AdminField>
+            ))
+          : null}
+        {!currentGuide.showFacebookCommentFields && !supportsMultiPlatformFollow ? (
+          <AdminField label={getPrimaryUrlLabel(selectedType)}>
             <input
               className={adminInputClass}
               defaultValue={task?.configJson?.primaryUrl ?? ""}
@@ -1634,9 +2409,10 @@ function TaskForm({
             />
           </AdminField>
         ) : null}
-        <AdminField
-          label={shouldSimplifySocialCommentForm ? "Button text" : "Primary label"}
-        >
+        {currentGuide.showPrimaryLabelField === false ? null : (
+          <AdminField
+            label={shouldSimplifySocialCommentForm ? "Button text" : "Primary label"}
+          >
             <input
               className={adminInputClass}
               defaultValue={
@@ -1649,7 +2425,8 @@ function TaskForm({
               }
               name="primaryLabel"
             />
-        </AdminField>
+          </AdminField>
+        )}
         {currentGuide.showSecondaryLinkFields ? (
           <>
             <AdminField label="Secondary URL">
@@ -1961,6 +2738,532 @@ function TaskForm({
           </label>
         </div>
       ) : null}
+      {supportsQuestionnaire ? (
+        <div className="rounded-2xl bg-white/70 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                5. Configure shared questions
+              </p>
+              <p className="mt-2 text-sm leading-6 text-slate-700">
+                These questions always show after the interest explorer. Use
+                them for email, contact method, or other shared fields.
+              </p>
+            </div>
+            <Button
+              onClick={() =>
+                setFormQuestions((currentQuestions) => [
+                  ...currentQuestions,
+                  createEmptyQuestionDraft(currentQuestions.length),
+                ])
+              }
+              tone="secondary"
+              type="button"
+            >
+              Add question
+            </Button>
+          </div>
+          <div className="mt-4 space-y-4">
+            {formQuestions.map((question, index) => {
+              const showsOptions =
+                question.type === "SINGLE_SELECT" || question.type === "MULTI_SELECT";
+
+              return (
+                <div
+                  className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-4"
+                  key={question.id}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm font-semibold text-slate-900">
+                      Question {index + 1}
+                    </p>
+                    <button
+                      className="text-sm font-semibold text-rose-700 underline"
+                      onClick={() =>
+                        setFormQuestions((currentQuestions) =>
+                          currentQuestions.filter(
+                            (entry) => entry.id !== question.id,
+                          ),
+                        )
+                      }
+                      type="button"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                    <AdminField label="Question label">
+                      <input
+                        className={adminInputClass}
+                        onChange={(event) =>
+                          updateQuestion(question.id, (currentQuestion) => ({
+                            ...currentQuestion,
+                            label: event.target.value,
+                          }))
+                        }
+                        value={question.label}
+                      />
+                    </AdminField>
+                    <AdminField label="Input type">
+                      <select
+                        className={adminInputClass}
+                        onChange={(event) =>
+                          updateQuestion(question.id, (currentQuestion) => ({
+                            ...currentQuestion,
+                            allowOther:
+                              event.target.value === "SINGLE_SELECT" ||
+                              event.target.value === "MULTI_SELECT"
+                                ? currentQuestion.allowOther
+                                : false,
+                            optionsText:
+                              event.target.value === "SINGLE_SELECT" ||
+                              event.target.value === "MULTI_SELECT"
+                                ? currentQuestion.optionsText
+                                : "",
+                            type: event.target.value as FormQuestionTypeValue,
+                          }))
+                        }
+                        value={question.type}
+                      >
+                        {formQuestionTypes.map((type) => (
+                          <option key={type} value={type}>
+                            {formatEnumLabel(type)}
+                          </option>
+                        ))}
+                      </select>
+                    </AdminField>
+                    <AdminField label="Map to field">
+                      <select
+                        className={adminInputClass}
+                        onChange={(event) =>
+                          updateQuestion(question.id, (currentQuestion) => ({
+                            ...currentQuestion,
+                            fieldKey:
+                              event.target.value as FormQuestionFieldKeyValue,
+                          }))
+                        }
+                        value={question.fieldKey}
+                      >
+                        {formQuestionFieldKeys.map((fieldKey) => (
+                          <option key={fieldKey} value={fieldKey}>
+                            {formatEnumLabel(fieldKey)}
+                          </option>
+                        ))}
+                      </select>
+                    </AdminField>
+                    <AdminField label="Helper text">
+                      <input
+                        className={adminInputClass}
+                        onChange={(event) =>
+                          updateQuestion(question.id, (currentQuestion) => ({
+                            ...currentQuestion,
+                            helperText: event.target.value,
+                          }))
+                        }
+                        value={question.helperText}
+                      />
+                    </AdminField>
+                  </div>
+                  {showsOptions ? (
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                      <AdminField label="Options (one per line)">
+                        <textarea
+                          className={adminInputClass}
+                          onChange={(event) =>
+                            updateQuestion(question.id, (currentQuestion) => ({
+                              ...currentQuestion,
+                              optionsText: event.target.value,
+                            }))
+                          }
+                          rows={5}
+                          value={question.optionsText}
+                        />
+                      </AdminField>
+                      <div className="space-y-3 rounded-xl bg-white px-4 py-3 text-sm text-slate-700">
+                        <label className="flex items-center gap-3">
+                          <input
+                            checked={question.required}
+                            onChange={(event) =>
+                              updateQuestion(
+                                question.id,
+                                (currentQuestion) => ({
+                                  ...currentQuestion,
+                                  required: event.target.checked,
+                                }),
+                              )
+                            }
+                            type="checkbox"
+                          />
+                          Required
+                        </label>
+                        <label className="flex items-center gap-3">
+                          <input
+                            checked={question.allowOther}
+                            onChange={(event) =>
+                              updateQuestion(
+                                question.id,
+                                (currentQuestion) => ({
+                                  ...currentQuestion,
+                                  allowOther: event.target.checked,
+                                }),
+                              )
+                            }
+                            type="checkbox"
+                          />
+                          Allow "Other" text input
+                        </label>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mt-3 rounded-xl bg-white px-4 py-3 text-sm text-slate-700">
+                      <label className="flex items-center gap-3">
+                        <input
+                          checked={question.required}
+                          onChange={(event) =>
+                            updateQuestion(question.id, (currentQuestion) => ({
+                              ...currentQuestion,
+                              required: event.target.checked,
+                            }))
+                          }
+                          type="checkbox"
+                        />
+                        Required
+                      </label>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            {formQuestions.length === 0 ? (
+              <p className="rounded-xl border border-dashed border-[var(--color-border)] px-4 py-3 text-sm text-slate-700">
+                No shared questions yet. Add email or contact fields here if
+                you want them outside the interest groups.
+              </p>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+      {supportsQuestionnaire ? (
+        <div className="rounded-2xl bg-white/70 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                6. Configure interest explorer groups
+              </p>
+              <p className="mt-2 text-sm leading-6 text-slate-700">
+                Each group becomes one interest card on the first screen. If a
+                participant selects "Yes", this whole group opens on the next
+                step.
+              </p>
+            </div>
+            <Button
+              onClick={() =>
+                setFormGroups((currentGroups) => [
+                  ...currentGroups,
+                  createEmptyGroupDraft(currentGroups.length),
+                ])
+              }
+              tone="secondary"
+              type="button"
+            >
+              Add group
+            </Button>
+          </div>
+          <div className="mt-4">
+            <AdminField label="Shared intro question">
+              <input
+                className={adminInputClass}
+                name="formGroupIntroLabel"
+                onChange={(event) => setFormGroupIntroLabel(event.target.value)}
+                value={formGroupIntroLabel}
+              />
+            </AdminField>
+          </div>
+          <div className="mt-4 space-y-4">
+            {formGroups.map((group, groupIndex) => (
+              <div
+                className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-4"
+                key={group.id}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm font-semibold text-slate-900">
+                    Group {groupIndex + 1}
+                  </p>
+                  <button
+                    className="text-sm font-semibold text-rose-700 underline"
+                    onClick={() =>
+                      setFormGroups((currentGroups) =>
+                        currentGroups.filter((entry) => entry.id !== group.id),
+                      )
+                    }
+                    type="button"
+                  >
+                    Remove group
+                  </button>
+                </div>
+                <div className="mt-4">
+                  <AdminField label="Group title">
+                    <input
+                      className={adminInputClass}
+                      onChange={(event) =>
+                        setFormGroups((currentGroups) =>
+                          currentGroups.map((entry) =>
+                            entry.id === group.id
+                              ? { ...entry, title: event.target.value }
+                              : entry,
+                          ),
+                        )
+                      }
+                      value={group.title}
+                    />
+                  </AdminField>
+                </div>
+                <div className="mt-4 flex items-center justify-between gap-3">
+                  <p className="text-sm font-semibold text-slate-900">
+                    Group questions
+                  </p>
+                  <Button
+                    onClick={() =>
+                      setFormGroups((currentGroups) =>
+                        currentGroups.map((entry) =>
+                          entry.id === group.id
+                            ? {
+                                ...entry,
+                                questions: [
+                                  ...entry.questions,
+                                  createEmptyQuestionDraft(entry.questions.length),
+                                ],
+                              }
+                            : entry,
+                        ),
+                      )
+                    }
+                    tone="secondary"
+                    type="button"
+                  >
+                    Add question
+                  </Button>
+                </div>
+                <div className="mt-4 space-y-4">
+                  {group.questions.map((question, questionIndex) => {
+                    const showsOptions =
+                      question.type === "SINGLE_SELECT" ||
+                      question.type === "MULTI_SELECT";
+
+                    return (
+                      <div className="rounded-xl bg-white p-4" key={question.id}>
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="text-sm font-semibold text-slate-900">
+                            Question {questionIndex + 1}
+                          </p>
+                          <button
+                            className="text-sm font-semibold text-rose-700 underline"
+                            onClick={() =>
+                              setFormGroups((currentGroups) =>
+                                currentGroups.map((entry) =>
+                                  entry.id === group.id
+                                    ? {
+                                        ...entry,
+                                        questions: entry.questions.filter(
+                                          (item) => item.id !== question.id,
+                                        ),
+                                      }
+                                    : entry,
+                                ),
+                              )
+                            }
+                            type="button"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                          <AdminField label="Question label">
+                            <input
+                              className={adminInputClass}
+                              onChange={(event) =>
+                                updateGroupQuestion(
+                                  group.id,
+                                  question.id,
+                                  (currentQuestion) => ({
+                                    ...currentQuestion,
+                                    label: event.target.value,
+                                  }),
+                                )
+                              }
+                              value={question.label}
+                            />
+                          </AdminField>
+                          <AdminField label="Input type">
+                            <select
+                              className={adminInputClass}
+                              onChange={(event) =>
+                                updateGroupQuestion(
+                                  group.id,
+                                  question.id,
+                                  (currentQuestion) => ({
+                                    ...currentQuestion,
+                                    allowOther:
+                                      event.target.value === "SINGLE_SELECT" ||
+                                      event.target.value === "MULTI_SELECT"
+                                        ? currentQuestion.allowOther
+                                        : false,
+                                    optionsText:
+                                      event.target.value === "SINGLE_SELECT" ||
+                                      event.target.value === "MULTI_SELECT"
+                                        ? currentQuestion.optionsText
+                                        : "",
+                                    type:
+                                      event.target.value as FormQuestionTypeValue,
+                                  }),
+                                )
+                              }
+                              value={question.type}
+                            >
+                              {formQuestionTypes.map((type) => (
+                                <option key={type} value={type}>
+                                  {formatEnumLabel(type)}
+                                </option>
+                              ))}
+                            </select>
+                          </AdminField>
+                          <AdminField label="Map to field">
+                            <select
+                              className={adminInputClass}
+                              onChange={(event) =>
+                                updateGroupQuestion(
+                                  group.id,
+                                  question.id,
+                                  (currentQuestion) => ({
+                                    ...currentQuestion,
+                                    fieldKey:
+                                      event.target.value as FormQuestionFieldKeyValue,
+                                  }),
+                                )
+                              }
+                              value={question.fieldKey}
+                            >
+                              {formQuestionFieldKeys.map((fieldKey) => (
+                                <option key={fieldKey} value={fieldKey}>
+                                  {formatEnumLabel(fieldKey)}
+                                </option>
+                              ))}
+                            </select>
+                          </AdminField>
+                          <AdminField label="Helper text">
+                            <input
+                              className={adminInputClass}
+                              onChange={(event) =>
+                                updateGroupQuestion(
+                                  group.id,
+                                  question.id,
+                                  (currentQuestion) => ({
+                                    ...currentQuestion,
+                                    helperText: event.target.value,
+                                  }),
+                                )
+                              }
+                              value={question.helperText}
+                            />
+                          </AdminField>
+                        </div>
+                        {showsOptions ? (
+                          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                            <AdminField label="Options (one per line)">
+                              <textarea
+                                className={adminInputClass}
+                                onChange={(event) =>
+                                  updateGroupQuestion(
+                                    group.id,
+                                    question.id,
+                                    (currentQuestion) => ({
+                                      ...currentQuestion,
+                                      optionsText: event.target.value,
+                                    }),
+                                  )
+                                }
+                                rows={5}
+                                value={question.optionsText}
+                              />
+                            </AdminField>
+                            <div className="space-y-3 rounded-xl bg-[var(--color-surface-strong)] px-4 py-3 text-sm text-slate-700">
+                              <label className="flex items-center gap-3">
+                                <input
+                                  checked={question.required}
+                                  onChange={(event) =>
+                                    updateGroupQuestion(
+                                      group.id,
+                                      question.id,
+                                      (currentQuestion) => ({
+                                        ...currentQuestion,
+                                        required: event.target.checked,
+                                      }),
+                                    )
+                                  }
+                                  type="checkbox"
+                                />
+                                Required
+                              </label>
+                              <label className="flex items-center gap-3">
+                                <input
+                                  checked={question.allowOther}
+                                  onChange={(event) =>
+                                    updateGroupQuestion(
+                                      group.id,
+                                      question.id,
+                                      (currentQuestion) => ({
+                                        ...currentQuestion,
+                                        allowOther: event.target.checked,
+                                      }),
+                                    )
+                                  }
+                                  type="checkbox"
+                                />
+                                Allow "Other" text input
+                              </label>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="mt-3 rounded-xl bg-[var(--color-surface-strong)] px-4 py-3 text-sm text-slate-700">
+                            <label className="flex items-center gap-3">
+                              <input
+                                checked={question.required}
+                                onChange={(event) =>
+                                  updateGroupQuestion(
+                                    group.id,
+                                    question.id,
+                                    (currentQuestion) => ({
+                                      ...currentQuestion,
+                                      required: event.target.checked,
+                                    }),
+                                  )
+                                }
+                                type="checkbox"
+                              />
+                              Required
+                            </label>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {group.questions.length === 0 ? (
+                    <p className="rounded-xl border border-dashed border-[var(--color-border)] px-4 py-3 text-sm text-slate-700">
+                      No questions yet for this group.
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            ))}
+            {formGroups.length === 0 ? (
+              <p className="rounded-xl border border-dashed border-[var(--color-border)] px-4 py-3 text-sm text-slate-700">
+                No groups yet. Add one for each interest like Horselink,
+                teaching in China, horses to China, or products to China.
+              </p>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
       {isCurrentFormResult && actionData?.error ? (
         <p className="rounded-lg bg-rose-100 px-4 py-3 text-sm font-medium text-rose-800">
           {actionData.error}
@@ -1971,13 +3274,21 @@ function TaskForm({
           {actionData.success}
         </p>
       ) : null}
-      <Button disabled={isSubmittingThisForm} type="submit">
-        {isSubmittingThisForm
-          ? intent === "create"
-            ? "Creating..."
-            : "Saving..."
-          : buttonLabel}
-      </Button>
+      <div className="fixed inset-x-0 bottom-0 z-50 border-t border-[var(--color-border)] bg-white px-5 py-4 shadow-[0_-20px_50px_-35px_rgba(15,23,42,0.65)]">
+        <div className="mx-auto flex max-w-[1500px] items-center justify-end">
+          <Button
+            className="min-w-44"
+            disabled={isSubmittingThisForm}
+            type="submit"
+          >
+            {isSubmittingThisForm
+              ? intent === "create"
+                ? "Creating..."
+                : "Saving..."
+              : buttonLabel}
+          </Button>
+        </div>
+      </div>
     </Form>
   );
 }

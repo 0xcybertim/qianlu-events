@@ -1,10 +1,10 @@
 import { data, Link } from "react-router";
 import { qrScanResultSchema } from "@qianlu-events/schemas";
-import type { CSSProperties } from "react";
 
 import type { Route } from "./+types/event-scan";
 import { fetchExperience, postApi } from "../lib/api.server";
 import { getBrandingStyle } from "../lib/branding";
+import { CheckmarkBurst } from "../components/checkmark-burst";
 import { ScreenShell } from "../components/screen-shell";
 
 function requestWithSetCookie(request: Request, setCookie: string | null) {
@@ -64,78 +64,6 @@ function getResultCopy(status: string) {
   }
 }
 
-const checkmarkColors = [
-  "#0f9f6e",
-  "#22c55e",
-  "#16a34a",
-  "#34d399",
-  "#047857",
-  "#bbf7d0",
-];
-
-const confettiPieces = Array.from({ length: 100 }, (_, index) => {
-  const column = index % 20;
-  const row = Math.floor(index / 20);
-  const direction = column - 9.5;
-  const x = direction * 18 + (row % 2 === 0 ? 8 : -8);
-  const y = -128 - row * 22 - (column % 5) * 9;
-  const rotation = (index * 47) % 360;
-  const delay = (index % 12) * 0.018;
-  const duration = 1.1 + (index % 7) * 0.055;
-
-  return {
-    color: checkmarkColors[index % checkmarkColors.length],
-    delay,
-    duration,
-    rotation,
-    size: 9 + (index % 5) * 4,
-    x,
-    y,
-  };
-});
-
-function SuccessBurst() {
-  return (
-    <div aria-hidden="true" className="scan-success-burst">
-      <div className="scan-success-mark">
-        <svg
-          className="size-16"
-          fill="none"
-          viewBox="0 0 64 64"
-          xmlns="http://www.w3.org/2000/svg"
-        >
-          <path
-            d="M18 33.5 27.2 43 47 21"
-            stroke="currentColor"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth="7"
-          />
-        </svg>
-      </div>
-      <div className="scan-confetti-stage">
-        {confettiPieces.map((piece, index) => (
-          <span
-            className="scan-confetti-piece"
-            key={index}
-            style={
-              {
-                "--confetti-color": piece.color,
-                "--confetti-delay": `${piece.delay}s`,
-                "--confetti-duration": `${piece.duration}s`,
-                "--confetti-rotate": `${piece.rotation}deg`,
-                "--confetti-size": `${piece.size}px`,
-                "--confetti-x": `${piece.x}px`,
-                "--confetti-y": `${piece.y}px`,
-              } as CSSProperties
-            }
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
-
 export async function loader({ params, request }: Route.LoaderArgs) {
   const experienceResponse = await fetchExperience(params.eventSlug, request);
   const responseHeaders = new Headers(experienceResponse.init?.headers);
@@ -193,7 +121,7 @@ export default function EventScan({ loaderData, params }: Route.ComponentProps) 
     >
       <div className="space-y-4">
         <div className="card-surface rounded-[2rem] p-5">
-          {isAccepted ? <SuccessBurst /> : null}
+          {isAccepted ? <CheckmarkBurst /> : null}
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--color-primary)]">
             {loaderData.result.status.replace("_", " ")}
           </p>
@@ -229,7 +157,7 @@ export default function EventScan({ loaderData, params }: Route.ComponentProps) 
             data-analytics-scan-status={loaderData.result.status}
             to={`/${params.eventSlug}/tasks`}
           >
-            Back to tasks
+            Back to activities
           </Link>
           <Link
             className="action-link action-link-secondary"

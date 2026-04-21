@@ -1,9 +1,10 @@
-import { useState } from "react";
-import { Form, Link, redirect } from "react-router";
+import { useEffect, useRef, useState } from "react";
+import { Form, Link, redirect, useFetcher } from "react-router";
 import {
   buildSocialCommentText,
   getSocialCommentTaskConfig,
 } from "@qianlu-events/domain";
+import type { FormQuestion } from "@qianlu-events/schemas";
 import { Button, StatusBadge } from "@qianlu-events/ui";
 
 import type { Route } from "./+types/event-task";
@@ -13,7 +14,7 @@ import {
   postApi,
 } from "../lib/api.server";
 import { getBrandingStyle } from "../lib/branding";
-import { getStatusMeta, mapTaskAttempts } from "../lib/experience";
+import { mapTaskAttempts } from "../lib/experience";
 import {
   getTaskAnalyticsParams,
   summarizeAnalyticsCounts,
@@ -22,11 +23,15 @@ import {
 import {
   getTaskActionLinks,
   getTaskCategoryLabel,
+  getTaskFormGroupIntroLabel,
+  getTaskFormGroups,
+  getTaskFormQuestions,
   getTaskInstructions,
   getTaskPrimaryActionLabel,
   getTaskProofHint,
   getTaskSecondaryActionLabel,
 } from "../lib/task-presentation";
+import { CheckmarkBurst } from "../components/checkmark-burst";
 import { ScreenShell } from "../components/screen-shell";
 
 function humanizeTaskId(taskId: string) {
@@ -72,6 +77,588 @@ function CopyCommentButton({
   );
 }
 
+type TaskSubmissionResponseValue = string | boolean | string[];
+type TaskFormStep = {
+  groupId?: string;
+  groupTitle?: string;
+  question: FormQuestion;
+};
+const taskFormPayloadFieldName = "form-payload";
+
+function normalizeResponseValues(
+  value: TaskSubmissionResponseValue | undefined,
+): string[] {
+  if (typeof value === "string") {
+    return value ? [value] : [];
+  }
+
+  if (typeof value === "boolean") {
+    return value ? ["true"] : ["false"];
+  }
+
+  return value ?? [];
+}
+
+function isQuestionVisible(
+  question: FormQuestion,
+  responses: Record<string, TaskSubmissionResponseValue>,
+) {
+  const showWhen = question.showWhen;
+
+  if (!showWhen) {
+    return true;
+  }
+
+  const actualValues = normalizeResponseValues(responses[showWhen.questionId]);
+
+  if (actualValues.length === 0) {
+    return false;
+  }
+
+  return showWhen.answers.some((answer) => actualValues.includes(answer));
+}
+
+function getInitialQuestionResponse(
+  question: FormQuestion,
+  session: {
+    email?: string | null;
+    name?: string | null;
+  },
+) {
+  if (question.fieldKey === "NAME") {
+    return session.name ?? "";
+  }
+
+  if (question.fieldKey === "EMAIL") {
+    return session.email ?? "";
+  }
+
+  if (question.type === "MULTI_SELECT") {
+    return [];
+  }
+
+  if (question.type === "BOOLEAN") {
+    return "";
+  }
+
+  return "";
+}
+
+function createInitialQuestionResponses(
+  questions: FormQuestion[],
+  session: {
+    email?: string | null;
+    name?: string | null;
+  },
+) {
+  return Object.fromEntries(
+    questions.map((question) => [
+      question.id,
+      getInitialQuestionResponse(question, session),
+    ]),
+  ) as Record<string, TaskSubmissionResponseValue>;
+}
+
+function isQuestionAnswered(args: {
+  otherValue?: string;
+  question: FormQuestion;
+  responseValue: TaskSubmissionResponseValue | undefined;
+}) {
+  const { otherValue = "", question, responseValue } = args;
+
+  if (!question.required) {
+    return true;
+  }
+
+  if (question.type === "BOOLEAN") {
+    return typeof responseValue === "boolean";
+  }
+
+  if (question.type === "MULTI_SELECT") {
+    return Array.isArray(responseValue) && responseValue.length > 0;
+  }
+
+  if (typeof responseValue !== "string" || responseValue.trim().length === 0) {
+    return false;
+  }
+
+  if (question.allowOther && responseValue === "Other") {
+    return otherValue.trim().length > 0;
+  }
+
+  return true;
+}
+
+function getChoiceBlockClass(isSelected: boolean) {
+  return [
+    "min-h-28 rounded-[1.5rem] border px-4 py-4 text-left text-base font-semibold transition-colors duration-150",
+    "flex items-end justify-start",
+    isSelected
+      ? "border-[var(--color-primary)] bg-[var(--color-primary)] text-[var(--color-primary-contrast)]"
+      : "border-[var(--color-border)] bg-white/80 text-[var(--color-text)]",
+  ].join(" ");
+}
+
+function buildTaskFormPayload(formData: FormData) {
+  const payloadJson = formData.get(taskFormPayloadFieldName)?.toString();
+
+  if (payloadJson) {
+    try {
+      const parsedPayload = JSON.parse(payloadJson) as ReturnType<
+        typeof buildTaskFormPayloadFromState
+      >;
+
+      return parsedPayload;
+    } catch {
+      // Fall back to reading individual form controls below.
+    }
+  }
+
+  const responses: Record<string, TaskSubmissionResponseValue> = {};
+  const otherResponses: Record<string, string> = {};
+  const groupSelections: Record<string, boolean> = {};
+  const keys = new Set(Array.from(formData.keys()));
+
+  for (const key of keys) {
+    if (key.startsWith("group-toggle:")) {
+      const groupId = key.slice("group-toggle:".length);
+      const value = formData.get(key)?.toString().trim();
+
+      if (value === "true" || value === "false") {
+        groupSelections[groupId] = value === "true";
+      }
+    }
+
+    if (key.startsWith("response-multi:")) {
+      const questionId = key.slice("response-multi:".length);
+      const values = formData
+        .getAll(key)
+        .map((entry) => entry.toString().trim())
+        .filter(Boolean);
+
+      if (values.length > 0) {
+        responses[questionId] = values;
+      }
+    }
+
+    if (key.startsWith("response-bool:")) {
+      const questionId = key.slice("response-bool:".length);
+      const values = formData
+        .getAll(key)
+        .map((entry) => entry.toString().trim())
+        .filter(Boolean);
+
+      if (values.length > 0) {
+        responses[questionId] = values.at(-1) === "true";
+      }
+    }
+
+    if (key.startsWith("response-other:")) {
+      const questionId = key.slice("response-other:".length);
+      const value = formData.get(key)?.toString().trim();
+
+      if (value) {
+        otherResponses[questionId] = value;
+      }
+    }
+
+    if (key.startsWith("response:")) {
+      const questionId = key.slice("response:".length);
+      const value = formData.get(key)?.toString().trim();
+
+      if (value) {
+        responses[questionId] = value;
+      }
+    }
+  }
+
+  return {
+    groupSelections:
+      Object.keys(groupSelections).length > 0 ? groupSelections : undefined,
+    responses: Object.keys(responses).length > 0 ? responses : undefined,
+    otherResponses:
+      Object.keys(otherResponses).length > 0 ? otherResponses : undefined,
+  };
+}
+
+function buildTaskFormPayloadFromState(args: {
+  draftOtherResponses: Record<string, string>;
+  draftResponses: Record<string, TaskSubmissionResponseValue>;
+  groupSelections: Record<string, boolean>;
+  visibleFormSteps: TaskFormStep[];
+}) {
+  const responses: Record<string, TaskSubmissionResponseValue> = {};
+  const otherResponses: Record<string, string> = {};
+
+  for (const step of args.visibleFormSteps) {
+    const responseValue = args.draftResponses[step.question.id];
+    const otherValue = args.draftOtherResponses[step.question.id]?.trim();
+
+    if (typeof responseValue === "string" && responseValue.trim().length > 0) {
+      responses[step.question.id] = responseValue.trim();
+    }
+
+    if (typeof responseValue === "boolean") {
+      responses[step.question.id] = responseValue;
+    }
+
+    if (Array.isArray(responseValue) && responseValue.length > 0) {
+      responses[step.question.id] = responseValue;
+    }
+
+    if (otherValue) {
+      otherResponses[step.question.id] = otherValue;
+    }
+  }
+
+  return {
+    groupSelections:
+      Object.keys(args.groupSelections).length > 0
+        ? args.groupSelections
+        : undefined,
+    responses: Object.keys(responses).length > 0 ? responses : undefined,
+    otherResponses:
+      Object.keys(otherResponses).length > 0 ? otherResponses : undefined,
+  };
+}
+
+function getQuestionInputName(question: FormQuestion) {
+  switch (question.type) {
+    case "MULTI_SELECT":
+      return `response-multi:${question.id}`;
+    case "BOOLEAN":
+      return `response-bool:${question.id}`;
+    default:
+      return `response:${question.id}`;
+  }
+}
+
+function getQuestionOtherInputName(question: FormQuestion) {
+  return `response-other:${question.id}`;
+}
+
+function renderHiddenQuestionInputs(args: {
+  otherValue?: string;
+  question: FormQuestion;
+  responseValue: TaskSubmissionResponseValue | undefined;
+}) {
+  const { otherValue = "", question, responseValue } = args;
+  const inputName = getQuestionInputName(question);
+  const otherInputName = getQuestionOtherInputName(question);
+
+  if (question.type === "MULTI_SELECT") {
+    if (!Array.isArray(responseValue) || responseValue.length === 0) {
+      return otherValue ? (
+        <input key={`${question.id}-other`} name={otherInputName} type="hidden" value={otherValue} />
+      ) : null;
+    }
+
+    return (
+      <>
+        {responseValue.map((value) => (
+          <input key={`${question.id}-${value}`} name={inputName} type="hidden" value={value} />
+        ))}
+        {otherValue ? (
+          <input name={otherInputName} type="hidden" value={otherValue} />
+        ) : null}
+      </>
+    );
+  }
+
+  if (question.type === "BOOLEAN") {
+    if (typeof responseValue !== "boolean") {
+      return null;
+    }
+
+    return (
+      <input
+        key={`${question.id}-bool`}
+        name={inputName}
+        type="hidden"
+        value={responseValue ? "true" : "false"}
+      />
+    );
+  }
+
+  if (typeof responseValue === "string" && responseValue) {
+    return (
+      <>
+        <input key={`${question.id}-value`} name={inputName} type="hidden" value={responseValue} />
+        {otherValue ? (
+          <input key={`${question.id}-other`} name={otherInputName} type="hidden" value={otherValue} />
+        ) : null}
+      </>
+    );
+  }
+
+  return otherValue ? (
+    <input key={`${question.id}-other`} name={otherInputName} type="hidden" value={otherValue} />
+  ) : null;
+}
+
+function getQuestionDefaultValue(
+  question: FormQuestion,
+  session: {
+    email?: string | null;
+    name?: string | null;
+  },
+) {
+  if (question.fieldKey === "NAME") {
+    return session.name ?? "";
+  }
+
+  if (question.fieldKey === "EMAIL") {
+    return session.email ?? "";
+  }
+
+  return "";
+}
+
+function TaskFormQuestionField({
+  onOtherChange,
+  onResponseChange,
+  otherValue,
+  question,
+  responseValue,
+  session,
+}: {
+  onOtherChange: (value: string) => void;
+  onResponseChange: (value: TaskSubmissionResponseValue) => void;
+  otherValue: string;
+  question: FormQuestion;
+  responseValue: TaskSubmissionResponseValue;
+  session: {
+    email?: string | null;
+    name?: string | null;
+  };
+}) {
+  const inputName = getQuestionInputName(question);
+  const otherInputName = getQuestionOtherInputName(question);
+  const defaultValue =
+    typeof responseValue === "string"
+      ? responseValue
+      : getQuestionDefaultValue(question, session);
+
+  if (question.type === "BOOLEAN") {
+    return (
+      <div>
+        <span className="mb-4 block font-display text-3xl font-semibold leading-tight tracking-tight text-slate-950">
+          {question.label}
+        </span>
+        <input
+          name={inputName}
+          type="hidden"
+          value={
+            typeof responseValue === "boolean"
+              ? responseValue
+                ? "true"
+                : "false"
+              : ""
+          }
+        />
+        <div className="grid grid-cols-2 gap-3">
+          <button
+            className={getChoiceBlockClass(responseValue === true)}
+            onClick={() => onResponseChange(true)}
+            type="button"
+          >
+            Yes
+          </button>
+          <button
+            className={getChoiceBlockClass(responseValue === false)}
+            onClick={() => onResponseChange(false)}
+            type="button"
+          >
+            No
+          </button>
+        </div>
+        {question.helperText ? (
+          <p className="text-sm leading-6 text-slate-600">{question.helperText}</p>
+        ) : null}
+      </div>
+    );
+  }
+
+  if (question.type === "TEXTAREA") {
+    return (
+      <label className="block">
+        <span className="mb-4 block font-display text-3xl font-semibold leading-tight tracking-tight text-slate-950">
+          {question.label}
+        </span>
+        <textarea
+          className="w-full rounded-2xl border border-[var(--color-border)] bg-white px-4 py-3 text-sm outline-none ring-[var(--color-primary)] focus:ring-2"
+          name={inputName}
+          onChange={(event) => onResponseChange(event.target.value)}
+          required={question.required}
+          rows={4}
+          value={defaultValue}
+        />
+        {question.helperText ? (
+          <span className="text-sm leading-6 text-slate-600">{question.helperText}</span>
+        ) : null}
+      </label>
+    );
+  }
+
+  if (question.type === "SINGLE_SELECT") {
+    return (
+      <div>
+        <span className="mb-4 block font-display text-3xl font-semibold leading-tight tracking-tight text-slate-950">
+          {question.label}
+        </span>
+        <input
+          name={inputName}
+          type="hidden"
+          value={typeof responseValue === "string" ? responseValue : ""}
+        />
+        <div className="grid grid-cols-2 gap-3">
+          {question.options?.map((option) => (
+            <button
+              className={getChoiceBlockClass(responseValue === option)}
+              key={option}
+              onClick={() => onResponseChange(option)}
+              type="button"
+            >
+              {option}
+            </button>
+          ))}
+          {question.allowOther ? (
+            <button
+              className={getChoiceBlockClass(responseValue === "Other")}
+              onClick={() => onResponseChange("Other")}
+              type="button"
+            >
+              Other
+            </button>
+          ) : null}
+        </div>
+        {question.allowOther ? (
+          <label className="block space-y-2">
+            <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-600">
+              Other
+            </span>
+            <input
+              className="w-full rounded-2xl border border-[var(--color-border)] bg-white px-4 py-3 text-sm outline-none ring-[var(--color-primary)] focus:ring-2"
+              name={otherInputName}
+              onChange={(event) => onOtherChange(event.target.value)}
+              placeholder="Type your answer"
+              type="text"
+              value={otherValue}
+            />
+          </label>
+        ) : null}
+        {question.helperText ? (
+          <p className="text-sm leading-6 text-slate-600">{question.helperText}</p>
+        ) : null}
+      </div>
+    );
+  }
+
+  if (question.type === "MULTI_SELECT") {
+    const selectedValues = Array.isArray(responseValue) ? responseValue : [];
+
+    return (
+      <div>
+        <span className="mb-4 block font-display text-3xl font-semibold leading-tight tracking-tight text-slate-950">
+          {question.label}
+        </span>
+        <div className="grid grid-cols-2 gap-3">
+          {question.options?.map((option) => (
+            <label key={option}>
+              <input
+                checked={selectedValues.includes(option)}
+                className="sr-only"
+                name={inputName}
+                onChange={(event) => {
+                  if (event.target.checked) {
+                    onResponseChange([...selectedValues, option]);
+                  } else {
+                    onResponseChange(
+                      selectedValues.filter((value) => value !== option),
+                    );
+                  }
+                }}
+                type="checkbox"
+                value={option}
+              />
+              <span className={getChoiceBlockClass(selectedValues.includes(option))}>
+                {option}
+              </span>
+            </label>
+          ))}
+          {question.allowOther ? (
+            <label>
+              <input
+                checked={selectedValues.includes("Other")}
+                className="sr-only"
+                name={inputName}
+                onChange={(event) => {
+                  if (event.target.checked) {
+                    onResponseChange([...selectedValues, "Other"]);
+                  } else {
+                    onResponseChange(
+                      selectedValues.filter((value) => value !== "Other"),
+                    );
+                  }
+                }}
+                type="checkbox"
+                value="Other"
+              />
+              <span className={getChoiceBlockClass(selectedValues.includes("Other"))}>
+                Other
+              </span>
+            </label>
+          ) : null}
+        </div>
+        {question.allowOther ? (
+          <label className="block space-y-2">
+            <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-600">
+              Other
+            </span>
+            <input
+              className="w-full rounded-2xl border border-[var(--color-border)] bg-white px-4 py-3 text-sm outline-none ring-[var(--color-primary)] focus:ring-2"
+              name={otherInputName}
+              onChange={(event) => onOtherChange(event.target.value)}
+              placeholder="Type your answer"
+              type="text"
+              value={otherValue}
+            />
+          </label>
+        ) : null}
+        {question.helperText ? (
+          <p className="text-sm leading-6 text-slate-600">{question.helperText}</p>
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
+    <label className="block">
+      <span className="mb-4 block font-display text-3xl font-semibold leading-tight tracking-tight text-slate-950">
+        {question.label}
+      </span>
+      <input
+        className="w-full rounded-2xl border border-[var(--color-border)] bg-white px-4 py-3 text-sm outline-none ring-[var(--color-primary)] focus:ring-2"
+        onChange={(event) => onResponseChange(event.target.value)}
+        name={inputName}
+        placeholder={question.label}
+        required={question.required}
+        type={
+          question.type === "EMAIL"
+            ? "email"
+            : question.type === "PHONE"
+              ? "tel"
+              : "text"
+        }
+        value={defaultValue}
+      />
+      {question.helperText ? (
+        <span className="text-sm leading-6 text-slate-600">{question.helperText}</span>
+      ) : null}
+    </label>
+  );
+}
+
 export async function loader({ params, request }: Route.LoaderArgs) {
   return fetchExperience(params.eventSlug, request);
 }
@@ -92,28 +679,50 @@ export async function action({ params, request }: Route.ActionArgs) {
 
     await parseParticipantSessionResponse(response);
 
+    if (formData.get("mode") === "fetcher") {
+      return {
+        animationId: `${params.taskId}:${Date.now()}`,
+        intent: "claim",
+        ok: true,
+        taskId: params.taskId,
+      };
+    }
+
     return redirect(`/${params.eventSlug}/tasks/${params.taskId}`);
   }
 
-  if (intent === "form-submit") {
+  if (intent === "reset") {
     const response = await postApi(
-      `/task-attempts/${params.taskId}/form-submit`,
+      `/task-attempts/${params.taskId}/reset`,
       {
         eventSlug: params.eventSlug,
-        name: formData.get("name")?.toString() || undefined,
-        email: formData.get("email")?.toString() || undefined,
-        answer1: formData.get("answer1")?.toString() || undefined,
-        answer2: formData.get("answer2")?.toString() || undefined,
-        answer3: formData.get("answer3")?.toString() || undefined,
-        phone: formData.get("phone")?.toString() || undefined,
-        optIn: formData.get("optIn") === "on",
       },
       request,
     );
 
     await parseParticipantSessionResponse(response);
 
+    if (formData.get("mode") === "fetcher") {
+      return { intent: "reset", ok: true, taskId: params.taskId };
+    }
+
     return redirect(`/${params.eventSlug}/tasks/${params.taskId}`);
+  }
+
+  if (intent === "form-submit") {
+    const payload = buildTaskFormPayload(formData);
+    const response = await postApi(
+      `/task-attempts/${params.taskId}/form-submit`,
+      {
+        eventSlug: params.eventSlug,
+        ...payload,
+      },
+      request,
+    );
+
+    await parseParticipantSessionResponse(response);
+
+    return redirect(`/${params.eventSlug}/summary`);
   }
 
   if (intent === "await-auto-verification") {
@@ -135,6 +744,16 @@ export async function action({ params, request }: Route.ActionArgs) {
 
 export default function EventTask({ loaderData, params }: Route.ComponentProps) {
   const session = loaderData.session;
+  const socialFollowFetcher = useFetcher();
+  const socialFollowFetcherData = socialFollowFetcher.data as
+    | { animationId?: string; intent?: string; ok?: boolean; taskId?: string }
+    | undefined;
+  const lastFollowRewardAnimationId = useRef<string | null>(null);
+  const [activeFollowReward, setActiveFollowReward] = useState<{
+    key: string;
+    points: number;
+    taskId: string;
+  } | null>(null);
 
   if (!session) {
     throw new Response("Participant session could not be created.", {
@@ -142,7 +761,8 @@ export default function EventTask({ loaderData, params }: Route.ComponentProps) 
     });
   }
 
-  const taskItem = mapTaskAttempts(loaderData).find(
+  const taskItems = mapTaskAttempts(loaderData);
+  const taskItem = taskItems.find(
     ({ task }) => task.id === params.taskId,
   );
 
@@ -150,9 +770,17 @@ export default function EventTask({ loaderData, params }: Route.ComponentProps) 
     throw new Response("Task not found.", { status: 404 });
   }
 
-  const taskLabel = taskItem.task.title || humanizeTaskId(params.taskId);
-  const status = getStatusMeta(taskItem.attempt?.status ?? "NOT_STARTED");
-  const actionLinks = getTaskActionLinks(taskItem.task);
+  const socialFollowItems =
+    taskItem.task.type === "SOCIAL_FOLLOW"
+      ? taskItems.filter((item) => item.task.type === "SOCIAL_FOLLOW")
+      : [];
+  const isSocialFollowGroup = socialFollowItems.length > 1;
+  const taskLabel = isSocialFollowGroup
+    ? "Follow us on socials"
+    : taskItem.task.title || humanizeTaskId(params.taskId);
+  const actionLinks = isSocialFollowGroup
+    ? []
+    : getTaskActionLinks(taskItem.task);
   const instructions = getTaskInstructions(taskItem.task);
   const proofHint = getTaskProofHint(taskItem.task);
   const socialCommentConfig = getSocialCommentTaskConfig(taskItem.task);
@@ -172,10 +800,69 @@ export default function EventTask({ loaderData, params }: Route.ComponentProps) 
   ].includes(
     taskItem.task.type,
   );
-  const isLeadForm = taskItem.task.type === "LEAD_FORM";
-  const isQuiz = taskItem.task.type === "QUIZ";
-  const isWhatsApp = taskItem.task.type === "WHATSAPP_OPT_IN";
   const isStampScan = taskItem.task.type === "STAMP_SCAN";
+  const formQuestions = getTaskFormQuestions(taskItem.task);
+  const formGroups = getTaskFormGroups(taskItem.task);
+  const hasInterestExplorer = formGroups.length > 0;
+  const groupIntroLabel = getTaskFormGroupIntroLabel(taskItem.task);
+  const [groupSelections, setGroupSelections] = useState<Record<string, boolean>>(
+    () =>
+      Object.fromEntries(formGroups.map((group) => [group.id, false])) as Record<
+        string,
+        boolean
+      >,
+  );
+  const [interestStep, setInterestStep] = useState<"explore" | "details">(
+    hasInterestExplorer ? "explore" : "details",
+  );
+  const [currentFormStepIndex, setCurrentFormStepIndex] = useState(0);
+  const [draftResponses, setDraftResponses] = useState(() =>
+    createInitialQuestionResponses(
+      [...formQuestions, ...formGroups.flatMap((group) => group.questions)],
+      session,
+    ),
+  );
+  const [draftOtherResponses, setDraftOtherResponses] = useState<
+    Record<string, string>
+  >({});
+  const visibleFormQuestions = formQuestions.filter((question) =>
+    isQuestionVisible(question, draftResponses),
+  );
+  const visibleFormGroups = formGroups.filter(
+    (group) => groupSelections[group.id] === true,
+  );
+  const visibleFormSteps: TaskFormStep[] = [
+    ...visibleFormGroups.flatMap((group) =>
+      group.questions.map((question) => ({
+        groupId: group.id,
+        groupTitle: group.title,
+        question,
+      })),
+    ),
+    ...visibleFormQuestions.map((question) => ({ question })),
+  ];
+  const currentFormStep = visibleFormSteps.at(currentFormStepIndex) ?? null;
+  const isLastFormStep =
+    visibleFormSteps.length === 0 ||
+    currentFormStepIndex === visibleFormSteps.length - 1;
+  const submittedInlineForm = handlesInlineForm
+    ? ["COMPLETED_BY_USER", "PENDING_STAFF_CHECK", "VERIFIED"].includes(
+        taskItem.attempt?.status ?? "NOT_STARTED",
+      )
+    : false;
+  const canAdvanceCurrentStep = currentFormStep
+    ? isQuestionAnswered({
+        otherValue: draftOtherResponses[currentFormStep.question.id] ?? "",
+        question: currentFormStep.question,
+        responseValue: draftResponses[currentFormStep.question.id],
+      })
+    : true;
+  const draftFormPayload = buildTaskFormPayloadFromState({
+    draftOtherResponses,
+    draftResponses,
+    groupSelections,
+    visibleFormSteps,
+  });
   const themeStyle = getBrandingStyle(loaderData);
   const taskAnalyticsParams = getTaskAnalyticsParams(taskItem.task);
   const taskAnalyticsAttributes = Object.fromEntries(
@@ -197,14 +884,73 @@ export default function EventTask({ loaderData, params }: Route.ComponentProps) 
     task_status: taskItem.attempt?.status ?? "NOT_STARTED",
   };
 
+  useEffect(() => {
+    setCurrentFormStepIndex((currentIndex) =>
+      Math.min(currentIndex, Math.max(visibleFormSteps.length - 1, 0)),
+    );
+  }, [visibleFormSteps.length]);
+
+  useEffect(() => {
+    if (
+      socialFollowFetcher.state !== "idle" ||
+      !socialFollowFetcherData?.ok ||
+      socialFollowFetcherData.intent !== "claim" ||
+      !socialFollowFetcherData.animationId ||
+      !socialFollowFetcherData.taskId
+    ) {
+      return;
+    }
+
+    if (
+      lastFollowRewardAnimationId.current === socialFollowFetcherData.animationId
+    ) {
+      return;
+    }
+
+    lastFollowRewardAnimationId.current = socialFollowFetcherData.animationId;
+    const claimedFollowItem = socialFollowItems.find(
+      (followItem) => followItem.task.id === socialFollowFetcherData.taskId,
+    );
+
+    setActiveFollowReward({
+      key: socialFollowFetcherData.animationId,
+      points: claimedFollowItem?.task.points ?? 0,
+      taskId: socialFollowFetcherData.taskId,
+    });
+  }, [socialFollowFetcher.state, socialFollowFetcherData, socialFollowItems]);
+
+  useEffect(() => {
+    if (!activeFollowReward) {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      setActiveFollowReward(null);
+    }, 2100);
+
+    return () => window.clearTimeout(timeout);
+  }, [activeFollowReward]);
+
   return (
     <ScreenShell
-      eyebrow="Task detail"
+      eyebrow="Activity"
       title={taskLabel}
       description={
         isAutoVerifiableSocialCommentTask
           ? `Open the ${socialPlatformLabel} post, leave the exact comment text shown below, then let the app wait for automatic verification.`
-          : "Complete the task on this screen, submit your claim, and return to the summary when you are ready for staff verification."
+          : "Complete this activity on this screen, submit your claim, and return to the summary when you are ready for staff verification."
+      }
+      fixedHeader={
+        <Link
+          className="inline-flex min-h-11 items-center justify-center rounded-full border border-[var(--color-border)] bg-white px-5 py-2 text-sm font-semibold text-[var(--color-text)] shadow-[0_10px_24px_-18px_rgba(15,109,83,0.45)] transition-colors hover:border-[var(--color-primary)] hover:text-[var(--color-primary)]"
+          data-analytics-cta-name="back_to_task_list"
+          data-analytics-event="task_navigation_click"
+          data-analytics-location="fixed_header"
+          {...taskAnalyticsAttributes}
+          to={`/${params.eventSlug}/tasks`}
+        >
+          Back to activities
+        </Link>
       }
       marketing={{
         analytics: taskRouteAnalytics,
@@ -222,38 +968,138 @@ export default function EventTask({ loaderData, params }: Route.ComponentProps) 
     >
       <div className="space-y-4">
         <div className="card-surface rounded-[2rem] p-5">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--color-primary)]">
-                {getTaskCategoryLabel(taskItem.task)}
-              </p>
-              <h2 className="mt-3 font-display text-2xl font-semibold">
-                {taskItem.task.type}
-              </h2>
-            </div>
-            <StatusBadge label={status.label} tone={status.tone} />
-          </div>
+          <h2 className="font-display text-3xl font-semibold text-slate-950">
+            {taskLabel}
+          </h2>
           <p className="mt-4 text-sm leading-6 text-slate-700">
             {taskItem.task.description}
           </p>
-          <div className="mt-5 rounded-2xl bg-white/70 p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-              {isAutoVerifiableSocialCommentTask ? "Automatic verification" : "Staff will check"}
-            </p>
-            <p className="mt-2 text-sm leading-6 text-slate-700">
-              {isAutoVerifiableSocialCommentTask
-                ? `After you post the exact comment, this task waits for ${socialPlatformLabel} comment verification and updates automatically.`
-                : taskItem.task.requiresVerification
-                  ? "This task needs a visible proof step before it counts for instant rewards."
-                  : "This task updates your claimed score as soon as you submit it."}
-            </p>
-            {proofHint ? (
-              <p className="mt-2 text-sm leading-6 text-slate-700">
-                Proof to show: {proofHint}
-              </p>
-            ) : null}
-          </div>
-          {actionLinks.length > 0 ? (
+          {isSocialFollowGroup ? (
+            <div className="mt-6 space-y-3">
+              {socialFollowItems.map((followItem) => {
+                const link = getTaskActionLinks(followItem.task)[0];
+                const platformLabel = followItem.task.platform
+                  .toLowerCase()
+                  .split("_")
+                  .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+                  .join(" ");
+                const followStatus = followItem.attempt?.status ?? "NOT_STARTED";
+                const hasClaimedFollow = [
+                  "COMPLETED_BY_USER",
+                  "PENDING_STAFF_CHECK",
+                  "VERIFIED",
+                ].includes(followStatus);
+
+                return (
+                  <div
+                    className="rounded-[1.75rem] border border-[var(--color-border)] bg-white/80 p-4"
+                    key={followItem.task.id}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="font-display text-2xl font-semibold text-slate-950">
+                          {platformLabel}
+                        </p>
+                        <p className="mt-1 text-sm leading-6 text-slate-700">
+                          {followItem.task.points} point
+                          {followItem.task.points === 1 ? "" : "s"} for this follow.
+                        </p>
+                      </div>
+                      <StatusBadge {...followItem.status} />
+                    </div>
+                    <div className="mt-4 flex flex-col gap-3">
+                      {link ? (
+                        <a
+                          className="action-link w-full border border-[var(--color-primary)] bg-transparent text-[var(--color-primary)] shadow-none"
+                          data-analytics-cta-label={link.label}
+                          data-analytics-event="task_external_link_click"
+                          data-analytics-link-tone={link.tone}
+                          data-analytics-link-type="primary_url"
+                          href={link.href}
+                          rel="noreferrer"
+                          target="_blank"
+                        >
+                          {link.label}
+                        </a>
+                      ) : null}
+                      <socialFollowFetcher.Form
+                        action={`/${params.eventSlug}/tasks/${followItem.task.id}`}
+                        method="post"
+                      >
+                        <input
+                          name="intent"
+                          type="hidden"
+                          value={hasClaimedFollow ? "reset" : "claim"}
+                        />
+                        <input name="mode" type="hidden" value="fetcher" />
+                        <input
+                          name="status"
+                          type="hidden"
+                          value={
+                            followItem.task.requiresVerification
+                              ? "PENDING_STAFF_CHECK"
+                              : "COMPLETED_BY_USER"
+                          }
+                        />
+                        <div className="relative">
+                          {activeFollowReward?.taskId === followItem.task.id ? (
+                            <div className="follow-reward-animation">
+                              <CheckmarkBurst
+                                columns={12}
+                                durationScale={1.35}
+                                key={activeFollowReward.key}
+                                pieceCount={72}
+                                pieceScale={1.7}
+                                showMark={false}
+                                spread={5}
+                                variant="button"
+                              />
+                              <span
+                                className="follow-points-bubble"
+                                key={`${activeFollowReward.key}:points`}
+                              >
+                                + {activeFollowReward.points}
+                              </span>
+                            </div>
+                          ) : null}
+                          <Button
+                            className={[
+                              "w-full",
+                              hasClaimedFollow
+                                ? ""
+                                : "!border-amber-300 !bg-amber-200 !text-amber-950",
+                            ].join(" ")}
+                            data-analytics-claim-path={
+                              hasClaimedFollow
+                                ? "reset_to_open"
+                                : followItem.task.requiresVerification
+                                  ? "pending_staff_check"
+                                  : "completed_by_user"
+                            }
+                            data-analytics-event="task_claim_click"
+                            data-analytics-location="task_detail_social_follow_group"
+                            style={
+                              hasClaimedFollow
+                                ? undefined
+                                : {
+                                    boxShadow:
+                                      "0 0 42px -16px rgba(180, 83, 9, 0.55), 0 16px 42px -26px rgba(180, 83, 9, 0.45)",
+                                  }
+                            }
+                            type="submit"
+                          >
+                            {hasClaimedFollow
+                              ? "Follow claimed"
+                              : `I followed on ${platformLabel}`}
+                          </Button>
+                        </div>
+                      </socialFollowFetcher.Form>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : actionLinks.length > 0 ? (
             <div className="mt-6 flex flex-col gap-3">
               {actionLinks.map((link) => (
                 <a
@@ -279,121 +1125,235 @@ export default function EventTask({ loaderData, params }: Route.ComponentProps) 
               ))}
             </div>
           ) : null}
-          {handlesInlineForm ? (
-            <Form className="mt-6 space-y-4" method="post">
-              <input name="intent" type="hidden" value="form-submit" />
-              {isLeadForm ? (
-                <>
-                  <label className="block space-y-2">
-                    <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-600">
-                      Name
-                    </span>
-                    <input
-                      className="w-full rounded-2xl border border-[var(--color-border)] bg-white px-4 py-3 text-sm outline-none ring-[var(--color-primary)] focus:ring-2"
-                      defaultValue={session.name ?? ""}
-                      name="name"
-                      placeholder="Your name"
-                      required
-                      type="text"
-                    />
-                  </label>
-                  <label className="block space-y-2">
-                    <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-600">
-                      Email
-                    </span>
-                    <input
-                      className="w-full rounded-2xl border border-[var(--color-border)] bg-white px-4 py-3 text-sm outline-none ring-[var(--color-primary)] focus:ring-2"
-                      defaultValue={session.email ?? ""}
-                      name="email"
-                      placeholder="you@example.com"
-                      required
-                      type="email"
-                    />
-                  </label>
-                  <label className="flex items-center gap-3 rounded-2xl bg-white/70 px-4 py-3 text-sm text-slate-700">
-                    <input className="size-4 accent-[var(--color-primary)]" name="optIn" type="checkbox" />
-                    Keep me informed about future events and offers.
-                  </label>
-                </>
-              ) : null}
+          {submittedInlineForm ? (
+            <div className="mt-6 space-y-4">
+              <div className="rounded-[1.75rem] border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-5">
+                <p className="font-display text-3xl font-semibold leading-tight tracking-tight text-slate-950">
+                  Activity submitted
+                </p>
+                <p className="mt-4 text-base leading-7 text-slate-700">
+                  {taskItem.task.requiresVerification
+                    ? "Your answers are saved. Staff can check the result from the summary screen."
+                    : "Your answers are saved and your score has been updated."}
+                </p>
+              </div>
+            </div>
+          ) : handlesInlineForm && hasInterestExplorer && interestStep === "explore" ? (
+            <div className="mt-6 space-y-4">
+              <div className="rounded-2xl bg-white/70 p-4 text-sm leading-6 text-slate-700">
+                Select anything that could be interesting. You can choose
+                multiple interests, or continue without selecting any.
+              </div>
+              <div className="space-y-3">
+                {formGroups.map((group) => {
+                  const isSelected = groupSelections[group.id] === true;
 
-              {isQuiz ? (
-                <>
-                  <label className="block space-y-2">
-                    <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-600">
-                      Question 1
-                    </span>
-                    <input
-                      className="w-full rounded-2xl border border-[var(--color-border)] bg-white px-4 py-3 text-sm outline-none ring-[var(--color-primary)] focus:ring-2"
-                      name="answer1"
-                      placeholder="Your answer"
-                      required
-                      type="text"
-                    />
-                  </label>
-                  <label className="block space-y-2">
-                    <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-600">
-                      Question 2
-                    </span>
-                    <input
-                      className="w-full rounded-2xl border border-[var(--color-border)] bg-white px-4 py-3 text-sm outline-none ring-[var(--color-primary)] focus:ring-2"
-                      name="answer2"
-                      placeholder="Your answer"
-                      required
-                      type="text"
-                    />
-                  </label>
-                  <label className="block space-y-2">
-                    <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-600">
-                      Question 3
-                    </span>
-                    <input
-                      className="w-full rounded-2xl border border-[var(--color-border)] bg-white px-4 py-3 text-sm outline-none ring-[var(--color-primary)] focus:ring-2"
-                      name="answer3"
-                      placeholder="Your answer"
-                      required
-                      type="text"
-                    />
-                  </label>
-                </>
-              ) : null}
-
-              {isWhatsApp ? (
-                <label className="block space-y-2">
-                  <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-600">
-                    Phone number
-                  </span>
-                  <input
-                    className="w-full rounded-2xl border border-[var(--color-border)] bg-white px-4 py-3 text-sm outline-none ring-[var(--color-primary)] focus:ring-2"
-                    name="phone"
-                    placeholder="+31 ..."
-                    required
-                    type="tel"
-                  />
-                </label>
-              ) : null}
-
-              {taskItem.task.type === "NEWSLETTER_OPT_IN" ? (
-                <label className="flex items-center gap-3 rounded-2xl bg-white/70 px-4 py-3 text-sm text-slate-700">
-                  <input className="size-4 accent-[var(--color-primary)]" name="optIn" type="checkbox" />
-                  I want to receive campaign and event updates.
-                </label>
-              ) : null}
-
+                  return (
+                    <div
+                      className="rounded-[1.75rem] border border-[var(--color-border)] bg-white/80 p-4"
+                      key={group.id}
+                    >
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-primary)]">
+                        Interest explorer
+                      </p>
+                      <h3 className="mt-2 font-display text-2xl font-semibold text-slate-950">
+                        {group.title}
+                      </h3>
+                      <p className="mt-3 text-sm leading-6 text-slate-700">
+                        {groupIntroLabel}
+                      </p>
+                      <div className="mt-4 flex flex-wrap gap-3">
+                        <Button
+                          onClick={() =>
+                            setGroupSelections((currentSelections) => ({
+                              ...currentSelections,
+                              [group.id]: true,
+                            }))
+                          }
+                          tone={isSelected ? "primary" : "secondary"}
+                          type="button"
+                        >
+                          Yes
+                        </Button>
+                        <Button
+                          onClick={() =>
+                            setGroupSelections((currentSelections) => ({
+                              ...currentSelections,
+                              [group.id]: false,
+                            }))
+                          }
+                          tone={!isSelected ? "primary" : "secondary"}
+                          type="button"
+                        >
+                          No
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
               <Button
-                data-analytics-event="task_form_submit_click"
+                data-analytics-event="task_interest_explorer_continue_click"
                 data-analytics-form-type={taskItem.task.type}
                 data-analytics-location="task_detail"
                 {...taskAnalyticsAttributes}
-                type="submit"
+                onClick={() => setInterestStep("details")}
+                type="button"
               >
-                Submit task
+                Continue
               </Button>
+            </div>
+          ) : handlesInlineForm ? (
+            <Form className="mt-6 space-y-4 pb-36" method="post">
+              <input name="intent" type="hidden" value="form-submit" />
+              <input
+                name={taskFormPayloadFieldName}
+                type="hidden"
+                value={JSON.stringify(draftFormPayload)}
+              />
+              {hasInterestExplorer
+                ? Object.entries(groupSelections).map(([groupId, selected]) => (
+                    <input
+                      key={groupId}
+                      name={`group-toggle:${groupId}`}
+                      type="hidden"
+                      value={selected ? "true" : "false"}
+                    />
+                  ))
+                : null}
+              {visibleFormSteps.map((step, index) =>
+                index === currentFormStepIndex
+                  ? null
+                  : (
+                      <div className="hidden" key={`persisted-${step.question.id}`}>
+                        {renderHiddenQuestionInputs({
+                          otherValue: draftOtherResponses[step.question.id] ?? "",
+                          question: step.question,
+                          responseValue: draftResponses[step.question.id],
+                        })}
+                      </div>
+                    ),
+              )}
+              {currentFormStep ? (
+                <div className="space-y-4 rounded-[1.75rem] border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      {currentFormStep.groupTitle ? (
+                        <p className="font-display text-3xl font-semibold leading-tight tracking-tight text-[var(--color-primary)]">
+                          {currentFormStep.groupTitle}
+                        </p>
+                      ) : null}
+                    </div>
+                    {currentFormStep.groupTitle ? (
+                      <Button
+                        onClick={() =>
+                          setCurrentFormStepIndex((currentIndex) =>
+                            Math.min(currentIndex + 1, visibleFormSteps.length - 1),
+                          )
+                        }
+                        tone="secondary"
+                        type="button"
+                      >
+                        Skip
+                      </Button>
+                    ) : null}
+                  </div>
+                  <TaskFormQuestionField
+                    key={currentFormStep.question.id}
+                    onOtherChange={(value) =>
+                      setDraftOtherResponses((currentResponses) => ({
+                        ...currentResponses,
+                        [currentFormStep.question.id]: value,
+                      }))
+                    }
+                    onResponseChange={(value) =>
+                      setDraftResponses((currentResponses) => ({
+                        ...currentResponses,
+                        [currentFormStep.question.id]: value,
+                      }))
+                    }
+                    otherValue={draftOtherResponses[currentFormStep.question.id] ?? ""}
+                    question={currentFormStep.question}
+                    responseValue={draftResponses[currentFormStep.question.id] ?? ""}
+                    session={session}
+                  />
+                </div>
+              ) : (
+                <div className="rounded-[1.75rem] border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-4 text-sm leading-6 text-slate-700">
+                  No additional questions are configured for this activity.
+                </div>
+              )}
+              {isLastFormStep ? (
+                <div className="rounded-2xl bg-white/70 p-4 text-sm leading-6 text-slate-700">
+                  {isAutoVerifiableSocialCommentTask
+                    ? `After you submit, the app will wait for ${socialPlatformLabel} comment verification.`
+                    : taskItem.task.requiresVerification
+                      ? proofHint
+                        ? `At the end, staff may ask to check this on your phone. ${proofHint}`
+                        : "At the end, staff may ask to check this on your phone."
+                      : "Your score updates as soon as you submit."}
+                </div>
+              ) : null}
+
+              <div className="fixed inset-x-0 bottom-0 z-40 border-t border-[var(--color-border)] bg-[color:color-mix(in_srgb,var(--color-surface-strong)_94%,white)] px-5 pb-[max(env(safe-area-inset-bottom),1rem)] pt-4 shadow-[0_-16px_40px_-28px_rgba(15,109,83,0.35)] backdrop-blur">
+                <div className="mx-auto flex max-w-md gap-3">
+                  <Button
+                    disabled={!hasInterestExplorer && currentFormStepIndex === 0}
+                    onClick={() => {
+                      if (currentFormStepIndex > 0) {
+                        setCurrentFormStepIndex((currentIndex) => currentIndex - 1);
+                        return;
+                      }
+
+                      if (hasInterestExplorer) {
+                        setInterestStep("explore");
+                      }
+                    }}
+                    tone="secondary"
+                    type="button"
+                  >
+                    Previous
+                  </Button>
+                  {isLastFormStep ? (
+                    <Button
+                      data-analytics-event="task_form_submit_click"
+                      data-analytics-form-type={taskItem.task.type}
+                      data-analytics-location="task_detail"
+                      disabled={!canAdvanceCurrentStep}
+                      {...taskAnalyticsAttributes}
+                      className="flex-1"
+                      type="submit"
+                    >
+                      Submit activity
+                    </Button>
+                  ) : (
+                    <Button
+                      className="flex-1"
+                      data-analytics-event="task_form_next_click"
+                      data-analytics-form-type={taskItem.task.type}
+                      data-analytics-location="task_detail"
+                      disabled={!canAdvanceCurrentStep}
+                      {...taskAnalyticsAttributes}
+                      onClick={() =>
+                        setCurrentFormStepIndex((currentIndex) => currentIndex + 1)
+                      }
+                      type="button"
+                    >
+                      Next
+                    </Button>
+                  )}
+                </div>
+              </div>
             </Form>
+          ) : isSocialFollowGroup ? (
+            <div className="mt-5 rounded-2xl bg-white/70 p-4 text-sm leading-6 text-slate-700">
+              Open each social profile above and claim the follows one by one.
+              Each selected platform adds its own points.
+            </div>
           ) : isStampScan ? (
             <div className="mt-5 space-y-4">
               <div className="rounded-2xl bg-white/70 p-4 text-sm leading-6 text-slate-700">
-                Scan this stamp QR code at the event. The task updates
+                Scan this stamp QR code at the event. The activity updates
                 automatically when the stamp is accepted.
               </div>
               <Link
@@ -452,7 +1412,7 @@ export default function EventTask({ loaderData, params }: Route.ComponentProps) 
                   ? `Your ${socialPlatformLabel} comment has been verified automatically.`
                   : taskItem.attempt?.status === "PENDING_AUTO_VERIFICATION"
                     ? `The app is waiting for your ${socialPlatformLabel} comment to arrive. Verification can take a short time.`
-                    : `Once you comment and confirm here, the task will switch to waiting for ${socialPlatformLabel} comment verification.`}
+                    : `Once you comment and confirm here, the activity will switch to waiting for ${socialPlatformLabel} comment verification.`}
               </div>
             </>
           ) : (
@@ -478,47 +1438,27 @@ export default function EventTask({ loaderData, params }: Route.ComponentProps) 
                     {getTaskPrimaryActionLabel(taskItem.task)}
                   </Button>
                 </Form>
-                <Form method="post">
-                  <input name="intent" type="hidden" value="claim" />
-                  <input name="status" type="hidden" value="PENDING_STAFF_CHECK" />
-                  <Button
-                    data-analytics-claim-path="pending_staff_check"
-                    data-analytics-event="task_claim_click"
-                    data-analytics-location="task_detail"
-                    {...taskAnalyticsAttributes}
-                    tone="secondary"
-                    type="submit"
-                  >
-                    {getTaskSecondaryActionLabel(taskItem.task)}
-                  </Button>
-                </Form>
+                {taskItem.task.requiresVerification ? (
+                  <Form method="post">
+                    <input name="intent" type="hidden" value="claim" />
+                    <input name="status" type="hidden" value="PENDING_STAFF_CHECK" />
+                    <Button
+                      data-analytics-claim-path="pending_staff_check"
+                      data-analytics-event="task_claim_click"
+                      data-analytics-location="task_detail"
+                      {...taskAnalyticsAttributes}
+                      tone="secondary"
+                      type="submit"
+                    >
+                      {getTaskSecondaryActionLabel(taskItem.task)}
+                    </Button>
+                  </Form>
+                ) : null}
               </div>
             </>
           )}
         </div>
 
-        <div className="flex flex-col gap-3">
-          <Link
-            className="action-link action-link-primary"
-            data-analytics-cta-name="continue_to_summary"
-            data-analytics-event="task_navigation_click"
-            data-analytics-location="footer"
-            {...taskAnalyticsAttributes}
-            to={`/${params.eventSlug}/summary`}
-          >
-            Continue to summary
-          </Link>
-          <Link
-            className="action-link action-link-secondary"
-            data-analytics-cta-name="back_to_task_list"
-            data-analytics-event="task_navigation_click"
-            data-analytics-location="footer"
-            {...taskAnalyticsAttributes}
-            to={`/${params.eventSlug}/tasks`}
-          >
-            Back to task list
-          </Link>
-        </div>
       </div>
     </ScreenShell>
   );

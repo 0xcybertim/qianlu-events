@@ -32,6 +32,9 @@ function parseRewardTiers(formData: FormData) {
   const labels = formData
     .getAll("tierLabel")
     .map((value) => value.toString().trim());
+  const descriptions = formData
+    .getAll("tierDescription")
+    .map((value) => value.toString().trim());
   const thresholds = formData
     .getAll("tierThreshold")
     .map((value) => Number(value.toString()));
@@ -40,6 +43,7 @@ function parseRewardTiers(formData: FormData) {
     .map((key, index) => ({
       key,
       label: labels[index] ?? "",
+      ...(descriptions[index] ? { description: descriptions[index] } : {}),
       threshold: thresholds[index] ?? 0,
     }))
     .filter((tier) => tier.key && tier.label && Number.isFinite(tier.threshold));
@@ -120,6 +124,7 @@ export default function AdminEvent({
   const settings = event.settingsJson;
   const participantMessaging = settings?.participantMessaging;
   const tiers = [...(settings?.rewardTiers ?? []), {
+    description: "",
     key: "",
     label: "",
     threshold: 0,
@@ -253,25 +258,33 @@ export default function AdminEvent({
                 Reward tiers
               </legend>
               {tiers.map((tier, index) => (
-                <div className="grid grid-cols-[1fr_1fr_5rem] gap-2" key={index}>
-                  <input
-                    className={adminInputClass}
-                    defaultValue={tier.key}
-                    name="tierKey"
-                    placeholder="key"
-                  />
-                  <input
-                    className={adminInputClass}
-                    defaultValue={tier.label}
-                    name="tierLabel"
-                    placeholder="Label"
-                  />
-                  <input
-                    className={adminInputClass}
-                    defaultValue={tier.threshold}
-                    min={0}
-                    name="tierThreshold"
-                    type="number"
+                <div className="rounded-lg bg-white/70 p-3" key={index}>
+                  <div className="grid gap-2 sm:grid-cols-[1fr_1fr_5rem]">
+                    <input
+                      className={adminInputClass}
+                      defaultValue={tier.key}
+                      name="tierKey"
+                      placeholder="key"
+                    />
+                    <input
+                      className={adminInputClass}
+                      defaultValue={tier.label}
+                      name="tierLabel"
+                      placeholder="Reward name"
+                    />
+                    <input
+                      className={adminInputClass}
+                      defaultValue={tier.threshold}
+                      min={0}
+                      name="tierThreshold"
+                      type="number"
+                    />
+                  </div>
+                  <textarea
+                    className={`${adminInputClass} mt-2 min-h-20`}
+                    defaultValue={tier.description ?? ""}
+                    name="tierDescription"
+                    placeholder="Short reward description"
                   />
                 </div>
               ))}

@@ -6,6 +6,7 @@ export const taskTypeSchema = z.enum([
   "SOCIAL_LIKE",
   "SOCIAL_SHARE",
   "SOCIAL_COMMENT",
+  "SOCIAL_COMMENT_SELF_CLAIM",
   "LEAD_FORM",
   "QUIZ",
   "NEWSLETTER_OPT_IN",
@@ -62,6 +63,7 @@ export const verificationCodeParamSchema = z
 export const rewardTierSchema = z.object({
   key: z.string(),
   label: z.string(),
+  description: z.string().trim().min(1).optional(),
   threshold: z.number().int().nonnegative(),
 });
 
@@ -107,6 +109,99 @@ export const eventSettingsSchema = z.object({
   marketing: eventMarketingSchema.optional(),
 });
 
+export const formQuestionTypeSchema = z.enum([
+  "TEXT",
+  "EMAIL",
+  "PHONE",
+  "TEXTAREA",
+  "SINGLE_SELECT",
+  "MULTI_SELECT",
+  "BOOLEAN",
+]);
+
+export const formQuestionFieldKeySchema = z.enum([
+  "NONE",
+  "NAME",
+  "EMAIL",
+  "PHONE",
+  "OPT_IN",
+  "CONTACT_METHOD",
+]);
+
+export const formQuestionShowWhenSchema = z.object({
+  questionId: z.string().trim().min(1),
+  answers: z.array(z.string().trim().min(1)).min(1),
+});
+
+export const formQuestionGroupSchema = z.object({
+  id: z.string().trim().min(1),
+  title: z.string().trim().min(1),
+  questions: z.array(
+    z.object({
+      id: z.string().trim().min(1),
+      label: z.string().trim().min(1),
+      type: formQuestionTypeSchema,
+      required: z.boolean().optional(),
+      helperText: z.string().trim().min(1).optional(),
+      options: z.array(z.string().trim().min(1)).optional(),
+      allowOther: z.boolean().optional(),
+      fieldKey: formQuestionFieldKeySchema.optional(),
+    }).superRefine((value, ctx) => {
+      const expectsOptions =
+        value.type === "SINGLE_SELECT" || value.type === "MULTI_SELECT";
+
+      if (expectsOptions && (!value.options || value.options.length === 0)) {
+        ctx.addIssue({
+          code: "custom",
+          message: "Question options are required for select questions.",
+          path: ["options"],
+        });
+      }
+
+      if (!expectsOptions && value.options && value.options.length > 0) {
+        ctx.addIssue({
+          code: "custom",
+          message: "Only select questions can define options.",
+          path: ["options"],
+        });
+      }
+    }),
+  ),
+});
+
+export const formQuestionSchema = z
+  .object({
+    id: z.string().trim().min(1),
+    label: z.string().trim().min(1),
+    type: formQuestionTypeSchema,
+    required: z.boolean().optional(),
+    helperText: z.string().trim().min(1).optional(),
+    options: z.array(z.string().trim().min(1)).optional(),
+    allowOther: z.boolean().optional(),
+    fieldKey: formQuestionFieldKeySchema.optional(),
+    showWhen: formQuestionShowWhenSchema.optional(),
+  })
+  .superRefine((value, ctx) => {
+    const expectsOptions =
+      value.type === "SINGLE_SELECT" || value.type === "MULTI_SELECT";
+
+    if (expectsOptions && (!value.options || value.options.length === 0)) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Question options are required for select questions.",
+        path: ["options"],
+      });
+    }
+
+    if (!expectsOptions && value.options && value.options.length > 0) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Only select questions can define options.",
+        path: ["options"],
+      });
+    }
+  });
+
 export const taskConfigSchema = z.object({
   primaryUrl: z.string().url().optional(),
   secondaryUrl: z.string().url().optional(),
@@ -121,6 +216,9 @@ export const taskConfigSchema = z.object({
   instagramMediaId: z.string().trim().min(1).optional(),
   stampRunKey: z.string().trim().min(1).optional(),
   stampRunLabel: z.string().trim().min(1).optional(),
+  formQuestions: z.array(formQuestionSchema).optional(),
+  formGroupIntroLabel: z.string().trim().min(1).optional(),
+  formGroups: z.array(formQuestionGroupSchema).optional(),
 });
 
 export const facebookCommentTaskConfigSchema = taskConfigSchema.extend({
@@ -251,6 +349,10 @@ export const taskClaimBodySchema = z.object({
   status: z.enum(["COMPLETED_BY_USER", "PENDING_STAFF_CHECK"]),
 });
 
+export const taskResetBodySchema = z.object({
+  eventSlug: z.string().min(1),
+});
+
 export const taskAwaitAutoVerificationBodySchema = z.object({
   eventSlug: z.string().min(1),
 });
@@ -264,6 +366,18 @@ export const taskFormSubmissionBodySchema = z.object({
   answer3: z.string().trim().min(1).optional(),
   optIn: z.boolean().optional(),
   phone: z.string().trim().min(1).optional(),
+  responses: z
+    .record(
+      z.string(),
+      z.union([
+        z.string().trim().min(1),
+        z.array(z.string().trim().min(1)).min(1),
+        z.boolean(),
+      ]),
+    )
+    .optional(),
+  otherResponses: z.record(z.string(), z.string().trim().min(1)).optional(),
+  groupSelections: z.record(z.string(), z.boolean()).optional(),
 });
 
 export const verificationPinBodySchema = z.object({
@@ -754,12 +868,27 @@ export const adminLeadSchema = z.object({
   submittedTaskId: z.string(),
   status: taskAttemptStatusSchema,
   submittedAt: z.string().nullable(),
+  selectedInterests: z.array(z.string()),
+  answers: z.array(
+    z.object({
+      id: z.string(),
+      label: z.string(),
+      groupTitle: z.string().nullable(),
+      value: z.union([
+        z.string(),
+        z.array(z.string()),
+        z.boolean(),
+      ]).nullable(),
+      otherValue: z.string().nullable(),
+    }),
+  ),
   proofJson: z.unknown().nullable(),
 });
 
 export const adminRewardTierCountSchema = z.object({
   key: z.string(),
   label: z.string(),
+  description: z.string().nullable().optional(),
   threshold: z.number().int().nonnegative(),
   claimedCount: z.number().int().nonnegative(),
   verifiedCount: z.number().int().nonnegative(),
@@ -850,6 +979,11 @@ export type FacebookCommentTaskConfig = z.infer<
 export type InstagramCommentTaskConfig = z.infer<
   typeof instagramCommentTaskConfigSchema
 >;
+export type FormQuestionType = z.infer<typeof formQuestionTypeSchema>;
+export type FormQuestionFieldKey = z.infer<typeof formQuestionFieldKeySchema>;
+export type FormQuestionShowWhen = z.infer<typeof formQuestionShowWhenSchema>;
+export type FormQuestionGroup = z.infer<typeof formQuestionGroupSchema>;
+export type FormQuestion = z.infer<typeof formQuestionSchema>;
 export type TaskLike = z.infer<typeof taskSchema>;
 export type TaskAttemptLike = z.infer<typeof taskAttemptSchema>;
 export type ExperienceResponse = z.infer<typeof experienceResponseSchema>;

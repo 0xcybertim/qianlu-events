@@ -8,7 +8,7 @@ export function meta({}: Route.MetaArgs) {
     { title: "Qianlu Events" },
     {
       name: "description",
-      content: "Mobile-first event task app scaffold for Qianlu Events.",
+      content: "Mobile-first event activity app scaffold for Qianlu Events.",
     },
   ];
 }
@@ -29,7 +29,7 @@ export default function Home() {
             Preview the event flow skeleton
           </h2>
           <p className="mt-3 text-sm leading-6 text-slate-700">
-            Use the demo event route to inspect the participant landing page, task
+            Use the demo event route to inspect the participant landing page, activity
             list, summary screen, and the hidden verification screen.
           </p>
           <div className="mt-5 flex flex-col gap-3">
@@ -40,7 +40,7 @@ export default function Home() {
               className="action-link action-link-secondary"
               to="/demo-event/tasks"
             >
-              Jump straight to task list
+              Jump straight to activities
             </Link>
           </div>
         </div>
