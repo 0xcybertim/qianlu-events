@@ -11,6 +11,7 @@ type ScreenShellProps = {
   fixedHeader?: ReactNode;
   marketing?: ParticipantMarketingConfig;
   topContent?: ReactNode;
+  headerSize?: "default" | "compact";
   style?: CSSProperties;
   width?: "default" | "wide";
 };
@@ -21,6 +22,7 @@ export function ScreenShell({
   description,
   children,
   fixedHeader,
+  headerSize = "default",
   marketing,
   style,
   topContent,
@@ -53,10 +55,20 @@ export function ScreenShell({
             </p>
           ) : null}
           <div className="space-y-3">
-            <h1 className="font-display text-4xl font-semibold tracking-tight text-balance text-[var(--color-text)]">
+            <h1
+              className={`font-display font-semibold tracking-tight text-balance text-[var(--color-text)] ${
+                headerSize === "compact"
+                  ? "max-w-[11ch] text-3xl leading-[0.98] sm:text-[2.75rem]"
+                  : "text-4xl"
+              }`}
+            >
               {title}
             </h1>
-            <p className="max-w-sm text-sm leading-6 text-[color:color-mix(in_srgb,var(--color-text)_74%,white)]">
+            <p
+              className={`text-sm leading-6 text-[color:color-mix(in_srgb,var(--color-text)_74%,white)] ${
+                headerSize === "compact" ? "max-w-xs" : "max-w-sm"
+              }`}
+            >
               {description}
             </p>
           </div>

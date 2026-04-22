@@ -225,6 +225,42 @@ function TaskRewardAnimation({
   );
 }
 
+function LinkedInstantRewardCard({
+  reward,
+}: {
+  reward: NonNullable<ReturnType<typeof getTaskInstantRewardState>>;
+}) {
+  return (
+    <div className="rounded-[1.5rem] border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-4">
+      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-primary)]">
+        Linked instant reward
+      </p>
+      <div className="mt-3 flex items-center justify-between gap-3">
+        <div>
+          <p className="font-semibold text-slate-950">{reward.label}</p>
+          {reward.description ? (
+            <p className="mt-2 text-sm leading-6 text-slate-700">
+              {reward.description}
+            </p>
+          ) : null}
+        </div>
+        <StatusBadge
+          label={
+            reward.verified ? "Unlocked" : reward.eligible ? "Pending" : "Locked"
+          }
+          tone={
+            reward.verified
+              ? "verified"
+              : reward.eligible
+                ? "warning"
+                : "neutral"
+          }
+        />
+      </div>
+    </div>
+  );
+}
+
 function createInitialQuestionResponses(
   questions: FormQuestion[],
   session: {
@@ -926,6 +962,7 @@ export default function EventTask({ loaderData, params }: Route.ComponentProps) 
   ].includes(
     taskItem.task.type,
   );
+  const showRewardBelowContent = handlesInlineForm && Boolean(taskInstantReward);
   const isStampScan = taskItem.task.type === "STAMP_SCAN";
   const formQuestions = getTaskFormQuestions(taskItem.task);
   const formGroups = getTaskFormGroups(taskItem.task);
@@ -1053,6 +1090,7 @@ export default function EventTask({ loaderData, params }: Route.ComponentProps) 
   return (
     <ScreenShell
       eyebrow="Activity"
+      headerSize={handlesInlineForm ? "compact" : "default"}
       title={taskLabel}
       description={
         isAutoVerifiableSocialCommentTask
@@ -1098,39 +1136,9 @@ export default function EventTask({ loaderData, params }: Route.ComponentProps) 
           <p className="mt-4 text-sm leading-6 text-slate-700">
             {taskItem.task.description}
           </p>
-          {taskInstantReward ? (
-            <div className="mt-5 rounded-[1.5rem] border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-primary)]">
-                Linked instant reward
-              </p>
-              <div className="mt-3 flex items-center justify-between gap-3">
-                <div>
-                  <p className="font-semibold text-slate-950">
-                    {taskInstantReward.label}
-                  </p>
-                  {taskInstantReward.description ? (
-                    <p className="mt-2 text-sm leading-6 text-slate-700">
-                      {taskInstantReward.description}
-                    </p>
-                  ) : null}
-                </div>
-                <StatusBadge
-                  label={
-                    taskInstantReward.verified
-                      ? "Unlocked"
-                      : taskInstantReward.eligible
-                        ? "Pending"
-                        : "Locked"
-                  }
-                  tone={
-                    taskInstantReward.verified
-                      ? "verified"
-                      : taskInstantReward.eligible
-                        ? "warning"
-                        : "neutral"
-                  }
-                />
-              </div>
+          {taskInstantReward && !showRewardBelowContent ? (
+            <div className="mt-5">
+              <LinkedInstantRewardCard reward={taskInstantReward} />
             </div>
           ) : null}
           {isSocialFollowGroup ? (
@@ -1705,6 +1713,11 @@ export default function EventTask({ loaderData, params }: Route.ComponentProps) 
               </div>
             </>
           )}
+          {taskInstantReward && showRewardBelowContent ? (
+            <div className="mt-6">
+              <LinkedInstantRewardCard reward={taskInstantReward} />
+            </div>
+          ) : null}
         </div>
 
       </div>
