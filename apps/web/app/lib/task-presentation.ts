@@ -127,11 +127,17 @@ export function getTaskCategoryLabel(task: TaskLike) {
 export function getTaskInstructions(task: TaskLike) {
   switch (task.type) {
     case "SOCIAL_FOLLOW":
-      return [
-        `Open ${task.platform.toLowerCase()} and follow the brand account.`,
-        "Return to this page and confirm the action.",
-        "Show the follow state to staff if verification is required.",
-      ];
+      return task.requiresVerification
+        ? [
+            `Open ${task.platform.toLowerCase()} and follow the brand account.`,
+            "Return to this page and confirm the action.",
+            "Show the follow state to staff if verification is required.",
+          ]
+        : [
+            `Open ${task.platform.toLowerCase()} and follow the brand account.`,
+            "Return to this page and confirm the action.",
+            "Your points update as soon as you claim the follow here.",
+          ];
     case "LEAD_FORM":
       return [
         "Fill in the configured form questions carefully.",

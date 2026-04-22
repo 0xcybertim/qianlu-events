@@ -285,19 +285,31 @@ export default function EventTasks({ loaderData, params }: Route.ComponentProps)
               const verifiedFollowCount = card.items.filter(
                 (item) => item.attempt?.status === "VERIFIED",
               ).length;
+              const followVerificationRequired = card.items.some(
+                (item) => item.task.requiresVerification,
+              );
               const totalFollowPoints = card.items.reduce(
                 (sum, item) => sum + item.task.points,
                 0,
               );
               const groupStatus =
-                verifiedFollowCount === card.items.length
-                  ? { label: "Verified", tone: "verified" as const }
-                  : startedFollowCount > 0
-                    ? {
-                        label: `${startedFollowCount}/${card.items.length} done`,
-                        tone: "claimed" as const,
-                      }
-                    : { label: "Open", tone: "neutral" as const };
+                followVerificationRequired
+                  ? verifiedFollowCount === card.items.length
+                    ? { label: "Verified", tone: "verified" as const }
+                    : startedFollowCount > 0
+                      ? {
+                          label: `${startedFollowCount}/${card.items.length} done`,
+                          tone: "claimed" as const,
+                        }
+                      : { label: "Open", tone: "neutral" as const }
+                  : startedFollowCount === card.items.length
+                    ? { label: "Claimed", tone: "claimed" as const }
+                    : startedFollowCount > 0
+                      ? {
+                          label: `${startedFollowCount}/${card.items.length} done`,
+                          tone: "claimed" as const,
+                        }
+                      : { label: "Open", tone: "neutral" as const };
 
               return (
                 <Link
@@ -324,7 +336,9 @@ export default function EventTasks({ loaderData, params }: Route.ComponentProps)
                     <div className="flex flex-col items-end gap-2">
                       <StatusBadge {...groupStatus} />
                       <span className="text-xs uppercase tracking-[0.14em] text-slate-500">
-                        {verifiedFollowCount}/{card.items.length} verified
+                        {followVerificationRequired
+                          ? `${verifiedFollowCount}/${card.items.length} verified`
+                          : `${startedFollowCount}/${card.items.length} claimed`}
                       </span>
                     </div>
                   </div>

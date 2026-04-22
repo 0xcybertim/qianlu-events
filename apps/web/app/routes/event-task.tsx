@@ -774,6 +774,17 @@ export default function EventTask({ loaderData, params }: Route.ComponentProps) 
     taskItem.task.type === "SOCIAL_FOLLOW"
       ? taskItems.filter((item) => item.task.type === "SOCIAL_FOLLOW")
       : [];
+  const socialFollowRequiresVerification = socialFollowItems.some(
+    (followItem) => followItem.task.requiresVerification,
+  );
+  const claimedSocialFollowCount = socialFollowItems.filter((followItem) =>
+    ["COMPLETED_BY_USER", "PENDING_STAFF_CHECK", "VERIFIED"].includes(
+      followItem.attempt?.status ?? "NOT_STARTED",
+    ),
+  ).length;
+  const verifiedSocialFollowCount = socialFollowItems.filter(
+    (followItem) => followItem.attempt?.status === "VERIFIED",
+  ).length;
   const isSocialFollowGroup = socialFollowItems.length > 1;
   const taskLabel = isSocialFollowGroup
     ? "Follow us on socials"
@@ -938,7 +949,9 @@ export default function EventTask({ loaderData, params }: Route.ComponentProps) 
       description={
         isAutoVerifiableSocialCommentTask
           ? `Open the ${socialPlatformLabel} post, leave the exact comment text shown below, then let the app wait for automatic verification.`
-          : "Complete this activity on this screen, submit your claim, and return to the summary when you are ready for staff verification."
+          : taskItem.task.requiresVerification
+            ? "Complete this activity on this screen, submit your claim, and return to the summary when you are ready for staff verification."
+            : "Complete this activity on this screen and confirm it here to update your score immediately."
       }
       fixedHeader={
         <Link
@@ -1346,9 +1359,25 @@ export default function EventTask({ loaderData, params }: Route.ComponentProps) 
               </div>
             </Form>
           ) : isSocialFollowGroup ? (
-            <div className="mt-5 rounded-2xl bg-white/70 p-4 text-sm leading-6 text-slate-700">
-              Open each social profile above and claim the follows one by one.
-              Each selected platform adds its own points.
+            <div className="mt-5 space-y-4">
+              <div className="rounded-2xl bg-white/70 p-4 text-sm leading-6 text-slate-700">
+                {socialFollowRequiresVerification
+                  ? "Open each social profile above and claim the follows one by one. Each selected platform adds its own points, and staff may still ask to check the follow state on your phone."
+                  : "Open each social profile above and claim the follows one by one. Each selected platform adds its own points as soon as you confirm it here."}
+              </div>
+              <div className="rounded-[1.75rem] border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-4 text-sm leading-6 text-slate-700">
+                {socialFollowRequiresVerification
+                  ? verifiedSocialFollowCount === socialFollowItems.length
+                    ? "All selected follows have been verified."
+                    : claimedSocialFollowCount > 0
+                      ? `${claimedSocialFollowCount} of ${socialFollowItems.length} follows have been claimed. Any remaining staff checks will show on the badges above.`
+                      : "Claim each follow here after you complete it on the social app."
+                  : claimedSocialFollowCount === socialFollowItems.length
+                    ? "All selected follows have already been claimed and counted."
+                    : claimedSocialFollowCount > 0
+                      ? `${claimedSocialFollowCount} of ${socialFollowItems.length} follows have already been claimed and counted.`
+                      : "Claim each follow here after you complete it on the social app to add the points immediately."}
+              </div>
             </div>
           ) : isStampScan ? (
             <div className="mt-5 space-y-4">
