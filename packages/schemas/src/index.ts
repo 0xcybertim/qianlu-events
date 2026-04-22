@@ -44,6 +44,7 @@ export const rewardTypeSchema = z.enum([
   "TIERED_REWARD",
   "DAILY_PRIZE_DRAW",
 ]);
+export const instantRewardMatchModeSchema = z.enum(["ANY", "ALL"]);
 export const qrScanStatusSchema = z.enum([
   "ACCEPTED",
   "DUPLICATE",
@@ -71,6 +72,14 @@ export const participantMessagingSchema = z.object({
   saveProgressMessage: z.string().trim().min(1).optional(),
   prizeDrawLabel: z.string().trim().min(1).optional(),
   laterPrizeLabel: z.string().trim().min(1).optional(),
+});
+
+export const instantRewardRuleSchema = z.object({
+  key: z.string(),
+  label: z.string().trim().min(1),
+  description: z.string().trim().min(1).optional(),
+  taskIds: z.array(z.string()).default([]),
+  taskMatchMode: instantRewardMatchModeSchema.default("ANY"),
 });
 
 export const eventMarketingSchema = z
@@ -105,6 +114,7 @@ export const eventBrandingSchema = z.object({
 export const eventSettingsSchema = z.object({
   rewardTypes: z.array(rewardTypeSchema),
   rewardTiers: z.array(rewardTierSchema),
+  instantRewards: z.array(instantRewardRuleSchema).default([]),
   participantMessaging: participantMessagingSchema.optional(),
   marketing: eventMarketingSchema.optional(),
 });
@@ -207,6 +217,8 @@ export const taskConfigSchema = z.object({
   secondaryUrl: z.string().url().optional(),
   primaryLabel: z.string().trim().min(1).optional(),
   secondaryLabel: z.string().trim().min(1).optional(),
+  instantRewardLabel: z.string().trim().min(1).optional(),
+  instantRewardDescription: z.string().trim().min(1).optional(),
   proofHint: z.string().trim().min(1).optional(),
   requiredPrefix: z.string().trim().min(1).optional(),
   requireVerificationCode: z.boolean().optional(),
@@ -894,10 +906,28 @@ export const adminRewardTierCountSchema = z.object({
   verifiedCount: z.number().int().nonnegative(),
 });
 
+export const adminInstantRewardBreakdownSchema = z.object({
+  rewardKey: z.string(),
+  label: z.string(),
+  description: z.string().nullable().optional(),
+  taskMatchMode: instantRewardMatchModeSchema,
+  linkedTasks: z.array(
+    z.object({
+      id: z.string(),
+      title: z.string(),
+    }),
+  ),
+  eligibleCount: z.number().int().nonnegative(),
+  verifiedCount: z.number().int().nonnegative(),
+  eligibleParticipants: z.array(adminParticipantSchema),
+  verifiedParticipants: z.array(adminParticipantSchema),
+});
+
 export const adminRewardsReportSchema = z.object({
   instantRewardEligibleCount: z.number().int().nonnegative(),
   dailyDrawEligibleCount: z.number().int().nonnegative(),
   tierCounts: z.array(adminRewardTierCountSchema),
+  taskInstantRewards: z.array(adminInstantRewardBreakdownSchema),
   eligibleParticipants: z.object({
     instantReward: z.array(adminParticipantSchema),
     dailyDraw: z.array(adminParticipantSchema),
@@ -966,9 +996,13 @@ export type SocialPlatform = z.infer<typeof socialPlatformSchema>;
 export type VerificationType = z.infer<typeof verificationTypeSchema>;
 export type TaskAttemptStatus = z.infer<typeof taskAttemptStatusSchema>;
 export type RewardType = z.infer<typeof rewardTypeSchema>;
+export type InstantRewardMatchMode = z.infer<
+  typeof instantRewardMatchModeSchema
+>;
 export type QrScanStatus = z.infer<typeof qrScanStatusSchema>;
 export type AdminRole = z.infer<typeof adminRoleSchema>;
 export type RewardTier = z.infer<typeof rewardTierSchema>;
+export type EventInstantRewardRule = z.infer<typeof instantRewardRuleSchema>;
 export type ParticipantMessaging = z.infer<typeof participantMessagingSchema>;
 export type EventSettings = z.infer<typeof eventSettingsSchema>;
 export type EventMarketing = z.infer<typeof eventMarketingSchema>;

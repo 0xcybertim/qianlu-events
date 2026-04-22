@@ -14,7 +14,7 @@ import {
   postApi,
 } from "../lib/api.server";
 import { getBrandingStyle } from "../lib/branding";
-import { mapTaskAttempts } from "../lib/experience";
+import { getTaskInstantRewardState, mapTaskAttempts } from "../lib/experience";
 import {
   getTaskAnalyticsParams,
   summarizeAnalyticsCounts,
@@ -774,6 +774,10 @@ export default function EventTask({ loaderData, params }: Route.ComponentProps) 
     taskItem.task.type === "SOCIAL_FOLLOW"
       ? taskItems.filter((item) => item.task.type === "SOCIAL_FOLLOW")
       : [];
+  const taskInstantReward = getTaskInstantRewardState(
+    loaderData,
+    taskItem.task.id,
+  );
   const socialFollowRequiresVerification = socialFollowItems.some(
     (followItem) => followItem.task.requiresVerification,
   );
@@ -987,6 +991,41 @@ export default function EventTask({ loaderData, params }: Route.ComponentProps) 
           <p className="mt-4 text-sm leading-6 text-slate-700">
             {taskItem.task.description}
           </p>
+          {taskInstantReward ? (
+            <div className="mt-5 rounded-[1.5rem] border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-primary)]">
+                Linked instant reward
+              </p>
+              <div className="mt-3 flex items-center justify-between gap-3">
+                <div>
+                  <p className="font-semibold text-slate-950">
+                    {taskInstantReward.label}
+                  </p>
+                  {taskInstantReward.description ? (
+                    <p className="mt-2 text-sm leading-6 text-slate-700">
+                      {taskInstantReward.description}
+                    </p>
+                  ) : null}
+                </div>
+                <StatusBadge
+                  label={
+                    taskInstantReward.verified
+                      ? "Unlocked"
+                      : taskInstantReward.eligible
+                        ? "Pending"
+                        : "Locked"
+                  }
+                  tone={
+                    taskInstantReward.verified
+                      ? "verified"
+                      : taskInstantReward.eligible
+                        ? "warning"
+                        : "neutral"
+                  }
+                />
+              </div>
+            </div>
+          ) : null}
           {isSocialFollowGroup ? (
             <div className="mt-6 space-y-3">
               {socialFollowItems.map((followItem) => {
@@ -1149,6 +1188,17 @@ export default function EventTask({ loaderData, params }: Route.ComponentProps) 
                     ? "Your answers are saved. Staff can check the result from the summary screen."
                     : "Your answers are saved and your score has been updated."}
                 </p>
+                {taskInstantReward ? (
+                  <p className="mt-4 text-sm leading-6 text-slate-700">
+                    {taskInstantReward.verified
+                      ? `${taskInstantReward.label} is now unlocked.`
+                      : taskInstantReward.eligible
+                        ? `${taskInstantReward.label} is recorded and will be ready once linked task verification is complete.`
+                        : taskItem.task.requiresVerification
+                          ? `${taskInstantReward.label} will unlock once staff review is complete.`
+                          : `Complete the remaining linked task requirements to unlock ${taskInstantReward.label}.`}
+                  </p>
+                ) : null}
               </div>
             </div>
           ) : handlesInlineForm && hasInterestExplorer && interestStep === "explore" ? (
@@ -1304,7 +1354,9 @@ export default function EventTask({ loaderData, params }: Route.ComponentProps) 
                       ? proofHint
                         ? `At the end, staff may ask to check this on your phone. ${proofHint}`
                         : "At the end, staff may ask to check this on your phone."
-                      : "Your score updates as soon as you submit."}
+                      : taskInstantReward
+                        ? `Your score updates as soon as you submit, and ${taskInstantReward.label} unlocks immediately.`
+                        : "Your score updates as soon as you submit."}
                 </div>
               ) : null}
 

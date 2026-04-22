@@ -51,6 +51,7 @@ import {
   subscribeInstagramAccountToWebhooks,
 } from "../lib/instagram.js";
 import { prisma } from "../lib/prisma.js";
+import { recalculateEventSessions } from "../lib/session-state.js";
 
 const leadTaskTypes = [
   "LEAD_FORM",
@@ -1680,6 +1681,8 @@ export function registerAdminRoutes(app: FastifyInstance) {
           },
         },
       });
+
+      await recalculateEventSessions(access.event.id);
 
       return serializeAdminEventDetail(event);
     },
@@ -3352,6 +3355,7 @@ export function registerAdminRoutes(app: FastifyInstance) {
       });
 
       await createDefaultQrCodeForStampTask(task);
+      await recalculateEventSessions(access.event.id);
 
       reply.code(201);
 
@@ -3456,6 +3460,7 @@ export function registerAdminRoutes(app: FastifyInstance) {
       });
 
       await createDefaultQrCodeForStampTask(updatedTask);
+      await recalculateEventSessions(access.event.id);
 
       return updatedTask;
     },
@@ -3490,12 +3495,16 @@ export function registerAdminRoutes(app: FastifyInstance) {
         };
       }
 
-      return prisma.task.update({
+      const updatedTask = await prisma.task.update({
         where: { id: task.id },
         data: {
           isActive: false,
         },
       });
+
+      await recalculateEventSessions(access.event.id);
+
+      return updatedTask;
     },
   );
 
@@ -3662,6 +3671,7 @@ export function registerAdminRoutes(app: FastifyInstance) {
           eventId: access.event.id,
         },
         include: {
+          rewardEligibility: true,
           taskAttempts: true,
         },
         orderBy: { verifiedPoints: "desc" },
@@ -3673,6 +3683,55 @@ export function registerAdminRoutes(app: FastifyInstance) {
       const rewardTiers = eventSettings.success
         ? eventSettings.data.rewardTiers
         : [];
+      const configuredInstantRewards = eventSettings.success
+        ? eventSettings.data.instantRewards
+        : [];
+      const taskInstantRewards = configuredInstantRewards.map((reward) => {
+          const linkedTasks = reward.taskIds.flatMap((taskId) => {
+            const task = access.event.tasks.find((entry) => entry.id === taskId);
+
+            return task
+              ? [
+                  {
+                    id: task.id,
+                    title: task.title,
+                  },
+                ]
+              : [];
+          });
+          const eligibleParticipants = sessions
+            .filter((session) =>
+              session.rewardEligibility.some(
+                (eligibility) =>
+                  eligibility.rewardType === "INSTANT_REWARD" &&
+                  eligibility.rewardKey === reward.key &&
+                  eligibility.eligible,
+              ),
+            )
+            .map(serializeAdminParticipant);
+          const verifiedParticipants = sessions
+            .filter((session) =>
+              session.rewardEligibility.some(
+                (eligibility) =>
+                  eligibility.rewardType === "INSTANT_REWARD" &&
+                  eligibility.rewardKey === reward.key &&
+                  eligibility.verified,
+              ),
+            )
+            .map(serializeAdminParticipant);
+
+          return {
+            rewardKey: reward.key,
+            label: reward.label,
+            description: reward.description ?? null,
+            taskMatchMode: reward.taskMatchMode,
+            linkedTasks,
+            eligibleCount: eligibleParticipants.length,
+            verifiedCount: verifiedParticipants.length,
+            eligibleParticipants,
+            verifiedParticipants,
+          };
+        });
 
       return {
         instantRewardEligibleCount: participants.filter(
@@ -3690,6 +3749,7 @@ export function registerAdminRoutes(app: FastifyInstance) {
             (participant) => participant.verifiedPoints >= tier.threshold,
           ).length,
         })),
+        taskInstantRewards,
         eligibleParticipants: {
           instantReward: participants.filter(
             (participant) => participant.instantRewardEligible,

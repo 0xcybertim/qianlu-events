@@ -74,12 +74,14 @@ export async function recalculateSessionState(sessionId: string) {
   const eventSettings = eventSettingsSchema.safeParse(session.event.settingsJson);
   const rewardTypes = eventSettings.success ? eventSettings.data.rewardTypes : [];
   const rewardTiers = eventSettings.success ? eventSettings.data.rewardTiers : [];
+  const instantRewards = eventSettings.success ? eventSettings.data.instantRewards : [];
 
   const snapshot = calculateRewardSnapshot({
     tasks: event.tasks,
     attempts: session.taskAttempts,
     rewardTiers,
     rewardTypes,
+    instantRewards,
   });
 
   await prisma.$transaction([
@@ -122,6 +124,16 @@ export async function recalculateSessionState(sessionId: string) {
                       verified: snapshot.instantRewardEligible,
                       reason: "Instant reward requires verified completion.",
                     },
+                    ...snapshot.instantRewards.map((reward) => ({
+                      participantSessionId: session.id,
+                      rewardType: "INSTANT_REWARD" as const,
+                      rewardKey: reward.rewardKey,
+                      eligible: reward.eligible,
+                      verified: reward.verified,
+                      reason: reward.description
+                        ? `${reward.label}: ${reward.description}`
+                        : reward.label,
+                    })),
                   ]
                 : []),
               ...(rewardTypes.includes("DAILY_PRIZE_DRAW")
@@ -156,6 +168,17 @@ export async function recalculateSessionState(sessionId: string) {
   });
 
   return serializeParticipantSessionForClient(updatedSession);
+}
+
+export async function recalculateEventSessions(eventId: string) {
+  const sessions = await prisma.participantSession.findMany({
+    where: { eventId },
+    select: { id: true },
+  });
+
+  for (const session of sessions) {
+    await recalculateSessionState(session.id);
+  }
 }
 
 export async function findEventSessionByToken(args: {

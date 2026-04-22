@@ -18,6 +18,7 @@ import {
   fetchAdminInstagramPendingConnection,
   selectAdminFacebookConnection,
   selectAdminInstagramConnection,
+  updateAdminEvent,
   updateAdminTask,
 } from "../lib/api.server";
 import {
@@ -1402,6 +1403,8 @@ function parseTaskForm(formData: FormData) {
         (platform === "INSTAGRAM" ? "Open Instagram post" : "Open Facebook post"))
       : primaryLabel,
     secondaryLabel: readOptional(formData, "secondaryLabel"),
+    instantRewardLabel: readOptional(formData, "instantRewardLabel"),
+    instantRewardDescription: readOptional(formData, "instantRewardDescription"),
     proofHint: readOptional(formData, "proofHint"),
     requiredPrefix: readOptional(formData, "requiredPrefix"),
     commentInstructions: readOptional(formData, "commentInstructions"),
@@ -1496,6 +1499,77 @@ function parseTaskCreateForms(formData: FormData) {
   });
 }
 
+function parseSelectedInstantRewardKey(formData: FormData) {
+  return readOptional(formData, "instantRewardKey");
+}
+
+function buildEventSettingsWithInstantRewards(args: {
+  currentEvent: Awaited<ReturnType<typeof fetchAdminEvent>>;
+  instantRewards: Array<{
+    key: string;
+    label: string;
+    description?: string;
+    taskIds: string[];
+    taskMatchMode: "ANY" | "ALL";
+  }>;
+}) {
+  return {
+    marketing: args.currentEvent.settingsJson?.marketing,
+    participantMessaging: args.currentEvent.settingsJson?.participantMessaging,
+    rewardTypes: args.currentEvent.settingsJson?.rewardTypes ?? [],
+    rewardTiers: args.currentEvent.settingsJson?.rewardTiers ?? [],
+    instantRewards: args.instantRewards,
+  };
+}
+
+async function syncInstantRewardLinks(args: {
+  eventSlug: string;
+  linkTaskIds?: string[];
+  request: Request;
+  selectedRewardKey?: string;
+  unlinkTaskIds?: string[];
+}) {
+  const currentEvent = await fetchAdminEvent(args.eventSlug, args.request);
+  const linkTaskIds = args.linkTaskIds ?? [];
+  const unlinkTaskIds = args.unlinkTaskIds ?? [];
+  const touchedTaskIds = new Set([...linkTaskIds, ...unlinkTaskIds]);
+  const nextInstantRewards = (currentEvent.settingsJson?.instantRewards ?? []).map(
+    (reward) => ({
+      ...reward,
+      taskIds: reward.taskIds.filter((taskId) => !touchedTaskIds.has(taskId)),
+    }),
+  );
+
+  if (args.selectedRewardKey) {
+    const rewardIndex = nextInstantRewards.findIndex(
+      (reward) => reward.key === args.selectedRewardKey,
+    );
+
+    if (rewardIndex >= 0) {
+      nextInstantRewards[rewardIndex] = {
+        ...nextInstantRewards[rewardIndex],
+        taskIds: Array.from(
+          new Set([
+            ...nextInstantRewards[rewardIndex].taskIds,
+            ...linkTaskIds,
+          ]),
+        ),
+      };
+    }
+  }
+
+  await updateAdminEvent(
+    args.eventSlug,
+    {
+      settingsJson: buildEventSettingsWithInstantRewards({
+        currentEvent,
+        instantRewards: nextInstantRewards,
+      }),
+    },
+    args.request,
+  );
+}
+
 function extractActionErrorMessage(error: unknown) {
   if (error && typeof error === "object") {
     const candidate = error as {
@@ -1564,14 +1638,23 @@ export async function action({ params, request }: Route.ActionArgs) {
   const formKey = formData.get("formKey")?.toString() ?? "";
   const intent = formData.get("intent")?.toString() ?? "";
   const taskId = formData.get("taskId")?.toString() ?? "";
+  const selectedInstantRewardKey = parseSelectedInstantRewardKey(formData);
 
   try {
     if (intent === "create") {
       const tasks = parseTaskCreateForms(formData);
+      const createdTasks = [];
 
       for (const task of tasks) {
-        await createAdminTask(params.eventSlug, task, request);
+        createdTasks.push(await createAdminTask(params.eventSlug, task, request));
       }
+
+      await syncInstantRewardLinks({
+        eventSlug: params.eventSlug,
+        linkTaskIds: createdTasks.map((task) => task.id),
+        request,
+        selectedRewardKey: selectedInstantRewardKey,
+      });
 
       return {
         formKey,
@@ -1605,6 +1688,12 @@ export async function action({ params, request }: Route.ActionArgs) {
         request,
       );
 
+      await syncInstantRewardLinks({
+        eventSlug: params.eventSlug,
+        request,
+        unlinkTaskIds: [taskId],
+      });
+
       return {
         formKey,
         success: "Task set to inactive.",
@@ -1613,6 +1702,12 @@ export async function action({ params, request }: Route.ActionArgs) {
 
     if (intent === "disable" && taskId) {
       await disableAdminTask(params.eventSlug, taskId, request);
+
+      await syncInstantRewardLinks({
+        eventSlug: params.eventSlug,
+        request,
+        unlinkTaskIds: [taskId],
+      });
 
       return {
         formKey,
@@ -1636,12 +1731,14 @@ export async function action({ params, request }: Route.ActionArgs) {
           .map((entry) => [entry.platform, entry.id]),
       );
 
-      await updateAdminTask(
-        params.eventSlug,
-        taskId,
-        primaryTask ?? parseTaskForm(formData),
-        request,
-      );
+      const savedTasks = [
+        await updateAdminTask(
+          params.eventSlug,
+          taskId,
+          primaryTask ?? parseTaskForm(formData),
+          request,
+        ),
+      ];
 
       for (const task of extraTasks) {
         const existingTaskId = existingFollowTaskByPlatform.get(
@@ -1649,9 +1746,11 @@ export async function action({ params, request }: Route.ActionArgs) {
         );
 
         if (existingTaskId) {
-          await updateAdminTask(params.eventSlug, existingTaskId, task, request);
+          savedTasks.push(
+            await updateAdminTask(params.eventSlug, existingTaskId, task, request),
+          );
         } else {
-          await createAdminTask(params.eventSlug, task, request);
+          savedTasks.push(await createAdminTask(params.eventSlug, task, request));
         }
       }
 
@@ -1674,6 +1773,21 @@ export async function action({ params, request }: Route.ActionArgs) {
             request,
           );
         }
+
+        await syncInstantRewardLinks({
+          eventSlug: params.eventSlug,
+          linkTaskIds: savedTasks.map((task) => task.id),
+          request,
+          selectedRewardKey: selectedInstantRewardKey,
+          unlinkTaskIds: deselectedFollowTasks.map((task) => task.id),
+        });
+      } else {
+        await syncInstantRewardLinks({
+          eventSlug: params.eventSlug,
+          linkTaskIds: savedTasks.map((task) => task.id),
+          request,
+          selectedRewardKey: selectedInstantRewardKey,
+        });
       }
 
       return {
@@ -1731,6 +1845,7 @@ export async function action({ params, request }: Route.ActionArgs) {
 function TaskForm({
   actionData,
   buttonLabel,
+  eventInstantRewards,
   eventTasks,
   facebookPostOptions,
   instagramMediaOptions,
@@ -1739,6 +1854,11 @@ function TaskForm({
 }: {
   actionData?: { error?: string; formKey?: string; success?: string } | null;
   buttonLabel: string;
+  eventInstantRewards: Array<{
+    key: string;
+    label: string;
+    taskIds: string[];
+  }>;
   eventTasks: Array<{
     configJson?: {
       primaryUrl?: string;
@@ -1811,6 +1931,10 @@ function TaskForm({
 }) {
   const navigation = useNavigation();
   const initialType = task?.type ?? "SOCIAL_FOLLOW";
+  const selectedInstantRewardKey =
+    (task
+      ? eventInstantRewards.find((reward) => reward.taskIds.includes(task.id))?.key
+      : undefined) ?? "";
   const formKey = task ? `task-${task.id}` : "task-create";
   const initialGuide = getTaskTypeGuide(initialType);
   const [selectedType, setSelectedType] = useState(initialType);
@@ -2456,6 +2580,30 @@ function TaskForm({
           />
         </AdminField>
       ) : null}
+      <div className="rounded-2xl bg-white/70 p-4">
+        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+          Linked instant reward
+        </p>
+        <p className="mt-2 text-sm leading-6 text-slate-700">
+          Optional. Link this task to one of the configured instant rewards.
+        </p>
+        <div className="mt-4">
+          <AdminField label="Instant reward">
+            <select
+              className={adminInputClass}
+              defaultValue={selectedInstantRewardKey}
+              name="instantRewardKey"
+            >
+              <option value="">No linked instant reward</option>
+              {eventInstantRewards.map((reward) => (
+                <option key={reward.key} value={reward.key}>
+                  {reward.label}
+                </option>
+              ))}
+            </select>
+          </AdminField>
+        </div>
+      </div>
       {currentGuide.showFacebookCommentFields ? (
         <>
           {isFacebookCommentPreset ? (
@@ -4426,6 +4574,7 @@ export default function AdminEventTasks({
                   <TaskForm
                     actionData={actionData}
                     buttonLabel="Create task"
+                    eventInstantRewards={event.settingsJson?.instantRewards ?? []}
                     eventTasks={event.tasks}
                     facebookPostOptions={facebookPostOptions}
                     instagramMediaOptions={instagramMediaOptions}
@@ -4444,6 +4593,7 @@ export default function AdminEventTasks({
                 <TaskForm
                   actionData={actionData}
                   buttonLabel="Save task"
+                  eventInstantRewards={event.settingsJson?.instantRewards ?? []}
                   eventTasks={event.tasks}
                   facebookPostOptions={facebookPostOptions}
                   instagramMediaOptions={instagramMediaOptions}
@@ -4488,6 +4638,7 @@ export default function AdminEventTasks({
                   <TaskForm
                     actionData={actionData}
                     buttonLabel="Create task"
+                    eventInstantRewards={event.settingsJson?.instantRewards ?? []}
                     eventTasks={event.tasks}
                     facebookPostOptions={facebookPostOptions}
                     instagramMediaOptions={instagramMediaOptions}

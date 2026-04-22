@@ -16,6 +16,20 @@ function getTaskConfig(task: TaskLike): TaskConfig | null {
   return task.configJson ?? null;
 }
 
+export function getTaskInstantReward(task: TaskLike) {
+  const config = getTaskConfig(task);
+  const label = config?.instantRewardLabel?.trim();
+
+  if (!label) {
+    return null;
+  }
+
+  return {
+    description: config?.instantRewardDescription?.trim() || null,
+    label,
+  };
+}
+
 function getDefaultTaskFormQuestions(taskType: TaskType): FormQuestion[] {
   switch (taskType) {
     case "LEAD_FORM":

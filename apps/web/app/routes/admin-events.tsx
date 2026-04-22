@@ -43,6 +43,7 @@ export async function action({ request }: Route.ActionArgs) {
         settingsJson: {
           rewardTypes: ["INSTANT_REWARD", "TIERED_REWARD", "DAILY_PRIZE_DRAW"],
           rewardTiers: [],
+          instantRewards: [],
         },
       },
       request,

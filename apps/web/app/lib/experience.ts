@@ -6,6 +6,7 @@ import type {
   RewardTier,
   TaskAttemptStatus,
 } from "@qianlu-events/schemas";
+import { calculateRewardSnapshot } from "@qianlu-events/domain";
 
 export function getRewardTiers(experience: ExperienceResponse): RewardTier[] {
   return experience.event.settingsJson?.rewardTiers ?? [];
@@ -122,4 +123,52 @@ export function mapTaskAttempts(experience: ExperienceResponse) {
       status: getStatusMeta(attempt?.status ?? "NOT_STARTED"),
     };
   });
+}
+
+export function getInstantRewardStates(experience: ExperienceResponse) {
+  const snapshot = calculateRewardSnapshot({
+    attempts: experience.session?.taskAttempts ?? [],
+    instantRewards: experience.event.settingsJson?.instantRewards ?? [],
+    rewardTiers: experience.event.settingsJson?.rewardTiers ?? [],
+    rewardTypes: experience.event.settingsJson?.rewardTypes ?? [],
+    tasks: experience.event.tasks,
+  });
+
+  return snapshot.instantRewards
+    .map((reward, index) => ({
+      description: reward.description ?? null,
+      eligible: reward.eligible,
+      label: reward.label,
+      linkedTasks: reward.taskIds.flatMap((taskId) => {
+        const task = experience.event.tasks.find((entry) => entry.id === taskId);
+
+        return task ? [task] : [];
+      }),
+      rewardKey: reward.rewardKey,
+      sortOrder: index,
+      taskIds: reward.taskIds,
+      taskMatchMode: reward.taskMatchMode,
+      verified: reward.verified,
+    }))
+    .sort((left, right) => {
+      const leftRank = left.verified ? 0 : left.eligible ? 1 : 2;
+      const rightRank = right.verified ? 0 : right.eligible ? 1 : 2;
+
+      if (leftRank !== rightRank) {
+        return leftRank - rightRank;
+      }
+
+      return left.sortOrder - right.sortOrder;
+    })
+    .map(({ sortOrder: _sortOrder, ...reward }) => reward);
+}
+
+export function getTaskInstantRewardState(
+  experience: ExperienceResponse,
+  taskId: string,
+) {
+  return (
+    getInstantRewardStates(experience).find((reward) => reward.taskIds.includes(taskId)) ??
+    null
+  );
 }

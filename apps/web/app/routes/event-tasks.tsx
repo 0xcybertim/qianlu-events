@@ -5,6 +5,7 @@ import type { Route } from "./+types/event-tasks";
 import { fetchExperience } from "../lib/api.server";
 import { getBrandingStyle } from "../lib/branding";
 import {
+  getInstantRewardStates,
   getParticipantContactBannerText,
   getRewardTiers,
   mapTaskAttempts,
@@ -18,6 +19,78 @@ import { ScreenShell } from "../components/screen-shell";
 
 function formatVerificationCode(code: string) {
   return code.replace(/(.{3})/g, "$1 ").trim();
+}
+
+function InstantRewardStateIcon({
+  eligible,
+  verified,
+}: {
+  eligible: boolean;
+  verified: boolean;
+}) {
+  const toneClass = verified
+    ? "bg-[var(--color-primary)] text-[var(--color-primary-contrast)]"
+    : eligible
+      ? "bg-amber-100 text-amber-900"
+      : "bg-slate-100 text-slate-500";
+
+  return (
+    <span
+      className={`absolute right-4 top-4 inline-flex size-10 items-center justify-center rounded-full ${toneClass}`}
+    >
+      {verified ? (
+        <svg aria-hidden="true" className="size-5" viewBox="0 0 20 20">
+          <path
+            d="m5 10 3 3 7-7"
+            fill="none"
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth="2.2"
+          />
+        </svg>
+      ) : eligible ? (
+        <svg aria-hidden="true" className="size-5" viewBox="0 0 20 20">
+          <path
+            d="M10 5.5v4l2.5 2.5"
+            fill="none"
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth="2"
+          />
+          <circle
+            cx="10"
+            cy="10"
+            fill="none"
+            r="6.5"
+            stroke="currentColor"
+            strokeWidth="2"
+          />
+        </svg>
+      ) : (
+        <svg aria-hidden="true" className="size-5" viewBox="0 0 20 20">
+          <rect
+            fill="none"
+            height="7"
+            rx="1.8"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            width="10"
+            x="5"
+            y="9"
+          />
+          <path
+            d="M7.5 9V7.6a2.5 2.5 0 0 1 5 0V9"
+            fill="none"
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeWidth="1.8"
+          />
+        </svg>
+      )}
+    </span>
+  );
 }
 
 export async function loader({ params, request }: Route.LoaderArgs) {
@@ -57,6 +130,11 @@ export default function EventTasks({ loaderData, params }: Route.ComponentProps)
   }
   const rewardTiers = [...getRewardTiers(loaderData)].sort(
     (firstTier, secondTier) => firstTier.threshold - secondTier.threshold,
+  );
+  const instantRewards = getInstantRewardStates(loaderData);
+  const unlockedInstantRewards = instantRewards.filter((reward) => reward.verified);
+  const pendingInstantRewards = instantRewards.filter(
+    (reward) => reward.eligible && !reward.verified,
   );
   const nextRewardTier =
     rewardTiers.find((tier) => session.claimedPoints < tier.threshold) ?? null;
@@ -191,6 +269,93 @@ export default function EventTasks({ loaderData, params }: Route.ComponentProps)
             </span>
           </div>
         </div>
+
+        {instantRewards.length > 0 ? (
+          <div className="card-surface rounded-[2rem] p-5">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--color-primary)]">
+                  Instant rewards
+                </p>
+                <h2 className="mt-2 font-display text-2xl font-semibold text-slate-950">
+                  Instant rewards
+                </h2>
+              </div>
+              <span className="rounded-full bg-[var(--color-primary)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-[var(--color-primary-contrast)]">
+                {unlockedInstantRewards.length} unlocked
+              </span>
+            </div>
+            <div className="mt-4 space-y-3">
+              {instantRewards.map((reward) => (
+                <div
+                  className={[
+                    "relative rounded-2xl border px-4 py-3 pr-16",
+                    reward.verified
+                      ? "border-[var(--color-primary)] bg-[color:color-mix(in_srgb,var(--color-primary)_10%,white)]"
+                      : reward.eligible
+                        ? "border-amber-200 bg-amber-50"
+                        : "border-[var(--color-border)] bg-white/70",
+                  ].join(" ")}
+                  key={reward.rewardKey}
+                >
+                  <InstantRewardStateIcon
+                    eligible={reward.eligible}
+                    verified={reward.verified}
+                  />
+                  <div>
+                    <p className="font-semibold text-slate-950">{reward.label}</p>
+                    <p className="mt-1 text-sm text-slate-600">
+                      {reward.linkedTasks.length > 0
+                        ? reward.taskMatchMode === "ALL"
+                          ? "Complete all of these tasks"
+                          : "Complete any of these tasks"
+                        : reward.taskIds.length > 0
+                          ? "Linked task is currently unavailable"
+                          : "No tasks linked yet"}
+                    </p>
+                    {reward.linkedTasks.length > 0 ? (
+                      <div className="mt-4 grid gap-3">
+                        {reward.linkedTasks.map((task) => (
+                          <Link
+                            className="flex min-h-12 w-full items-center justify-between gap-4 rounded-[1.1rem] bg-[var(--color-primary)] px-4 py-3 text-sm font-semibold text-[var(--color-primary-contrast)] shadow-[0_16px_32px_-20px_rgba(15,109,83,0.7)] transition-transform duration-150 hover:-translate-y-0.5"
+                            data-analytics-event="instant_reward_task_link_click"
+                            data-analytics-location="instant_reward_card"
+                            data-analytics-reward-key={reward.rewardKey}
+                            key={`${reward.rewardKey}-${task.id}`}
+                            to={`/${params.eventSlug}/tasks/${task.id}`}
+                          >
+                            <span className="min-w-0 flex-1 text-left text-base leading-6">
+                              {task.title}
+                            </span>
+                            <span className="shrink-0 text-xs uppercase tracking-[0.14em] opacity-80">
+                              Open
+                            </span>
+                          </Link>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="mt-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                        {reward.taskIds.length > 0
+                          ? "Reactivate or relink this task from the rewards setup."
+                          : "Add task links from the rewards setup."}
+                      </p>
+                    )}
+                    {reward.description ? (
+                      <p className="mt-2 text-sm leading-6 text-slate-600">
+                        {reward.description}
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+              ))}
+            </div>
+            {pendingInstantRewards.length > 0 ? (
+              <p className="mt-4 text-sm leading-6 text-slate-700">
+                Some booth rewards are waiting for verification before staff can hand them out.
+              </p>
+            ) : null}
+          </div>
+        ) : null}
 
         {rewardTiers.length > 0 ? (
           <div className="card-surface rounded-[2rem] p-5">
@@ -347,6 +512,9 @@ export default function EventTasks({ loaderData, params }: Route.ComponentProps)
             }
 
             const { attempt, status, task } = card.item;
+            const taskInstantReward = instantRewards.find(
+              (reward) => reward.taskIds.includes(task.id),
+            );
 
             return (
               <Link
@@ -375,6 +543,11 @@ export default function EventTasks({ loaderData, params }: Route.ComponentProps)
                     <p className="mt-2 text-sm leading-6 text-slate-700">
                       {task.description}
                     </p>
+                    {taskInstantReward ? (
+                      <p className="mt-3 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-primary)]">
+                        Unlocks {taskInstantReward.label}
+                      </p>
+                    ) : null}
                   </div>
                   <div className="flex flex-col items-end gap-2">
                     <StatusBadge {...status} />

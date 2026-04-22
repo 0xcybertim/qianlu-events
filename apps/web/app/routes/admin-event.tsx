@@ -99,6 +99,7 @@ export async function action({ params, request }: Route.ActionArgs) {
             .getAll("rewardTypes")
             .map((value) => value.toString()),
           rewardTiers: parseRewardTiers(formData),
+          instantRewards: currentEvent.settingsJson?.instantRewards ?? [],
           participantMessaging: parseParticipantMessaging(formData),
         },
       },

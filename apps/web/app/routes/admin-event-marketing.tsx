@@ -41,6 +41,7 @@ export async function action({ params, request }: Route.ActionArgs) {
         settingsJson: {
           rewardTypes: currentEvent.settingsJson?.rewardTypes ?? [],
           rewardTiers: currentEvent.settingsJson?.rewardTiers ?? [],
+          instantRewards: currentEvent.settingsJson?.instantRewards ?? [],
           participantMessaging: currentEvent.settingsJson?.participantMessaging,
           marketing: {
             ...(primaryPixelId ? { primaryPixelId } : {}),
