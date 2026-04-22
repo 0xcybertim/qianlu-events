@@ -722,7 +722,7 @@ export async function action({ params, request }: Route.ActionArgs) {
 
     await parseParticipantSessionResponse(response);
 
-    return redirect(`/${params.eventSlug}/summary`);
+    return redirect(`/${params.eventSlug}`);
   }
 
   if (intent === "await-auto-verification") {
