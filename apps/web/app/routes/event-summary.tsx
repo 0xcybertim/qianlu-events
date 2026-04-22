@@ -12,8 +12,13 @@ import {
   getRewardTypes,
   mapTaskAttempts,
 } from "../lib/experience";
+import { buildPageTitle } from "../lib/meta";
 import { summarizeAnalyticsCounts } from "../lib/marketing";
 import { ScreenShell } from "../components/screen-shell";
+
+export function meta({ params }: Route.MetaArgs) {
+  return [{ title: buildPageTitle("Verification Summary", params.eventSlug) }];
+}
 
 function formatVerificationCode(code: string) {
   return code.replace(/(.{3})/g, "$1 ").trim();

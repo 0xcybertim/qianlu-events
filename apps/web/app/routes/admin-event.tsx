@@ -4,6 +4,7 @@ import { Form, Link, redirect } from "react-router";
 import type { Route } from "./+types/admin-event";
 import { fetchAdminEvent, updateAdminEvent } from "../lib/api.server";
 import { getParticipantContactBannerText } from "../lib/experience";
+import { buildPageTitle } from "../lib/meta";
 import {
   AdminCard,
   AdminField,
@@ -26,6 +27,10 @@ const brandingFields = [
   ["text", "Text"],
   ["border", "Border"],
 ] as const;
+
+export function meta({ params }: Route.MetaArgs) {
+  return [{ title: buildPageTitle("Event Settings", params.eventSlug) }];
+}
 
 function parseRewardTiers(formData: FormData) {
   const keys = formData.getAll("tierKey").map((value) => value.toString().trim());

@@ -21,12 +21,17 @@ import {
   updateAdminEvent,
   updateAdminTask,
 } from "../lib/api.server";
+import { buildPageTitle } from "../lib/meta";
 import {
   AdminCard,
   AdminField,
   AdminShell,
   adminInputClass,
 } from "../components/admin-shell";
+
+export function meta({ params }: Route.MetaArgs) {
+  return [{ title: buildPageTitle("Tasks", params.eventSlug) }];
+}
 
 const taskTypes = [
   "SOCIAL_FOLLOW",

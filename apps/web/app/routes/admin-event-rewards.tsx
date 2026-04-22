@@ -7,12 +7,17 @@ import {
   fetchAdminRewards,
   updateAdminEvent,
 } from "../lib/api.server";
+import { buildPageTitle } from "../lib/meta";
 import {
   AdminCard,
   AdminField,
   AdminShell,
   adminInputClass,
 } from "../components/admin-shell";
+
+export function meta({ params }: Route.MetaArgs) {
+  return [{ title: buildPageTitle("Rewards", params.eventSlug) }];
+}
 
 function parseRewardTiers(formData: FormData) {
   const keys = formData.getAll("tierKey").map((value) => value.toString().trim());

@@ -35,6 +35,16 @@ export const links: Route.LinksFunction = () => [
   },
 ];
 
+export function meta() {
+  return [
+    { title: "Qianlu Events" },
+    {
+      name: "description",
+      content: "Mobile-first event engagement and rewards platform.",
+    },
+  ];
+}
+
 export const middleware = clerkEnabled ? [clerkMiddleware()] : [];
 
 export async function loader(args: Route.LoaderArgs) {

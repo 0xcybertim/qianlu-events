@@ -41,6 +41,48 @@ function humanizeTaskId(taskId: string) {
     .join(" ");
 }
 
+function taskStatusCountsAsClaimed(status: string | undefined) {
+  return [
+    "COMPLETED_BY_USER",
+    "PENDING_STAFF_CHECK",
+    "PENDING_AUTO_VERIFICATION",
+    "VERIFIED",
+  ].includes(status ?? "");
+}
+
+function getCompletedTaskActionLabel(args: {
+  requiresVerification: boolean;
+  status: string;
+  taskType: string;
+}) {
+  const isSocialCommentTask = [
+    "SOCIAL_COMMENT",
+    "SOCIAL_COMMENT_SELF_CLAIM",
+  ].includes(args.taskType);
+
+  if (args.status === "VERIFIED") {
+    return isSocialCommentTask ? "Activity completed" : "Completed";
+  }
+
+  if (args.status === "PENDING_STAFF_CHECK") {
+    return isSocialCommentTask ? "Activity completed" : "Waiting for review";
+  }
+
+  if (args.status === "PENDING_AUTO_VERIFICATION") {
+    return isSocialCommentTask ? "Activity completed" : "Checking";
+  }
+
+  if (args.status === "COMPLETED_BY_USER") {
+    if (isSocialCommentTask) {
+      return "Activity completed";
+    }
+
+    return "Completed";
+  }
+
+  return null;
+}
+
 function CopyCommentButton({
   analyticsParams,
   value,
@@ -142,6 +184,45 @@ function getInitialQuestionResponse(
   }
 
   return "";
+}
+
+type TaskActionFetcherData = {
+  animationId?: string;
+  intent?: string;
+  ok?: boolean;
+  pointsAwarded?: number;
+  slotId?: string;
+  taskId?: string;
+};
+
+function TaskRewardAnimation({
+  activeReward,
+  slotId,
+}: {
+  activeReward: { key: string; points: number; slotId: string } | null;
+  slotId: string;
+}) {
+  if (!activeReward || activeReward.slotId !== slotId) {
+    return null;
+  }
+
+  return (
+    <div className="task-reward-animation">
+      <CheckmarkBurst
+        columns={12}
+        durationScale={1.35}
+        key={activeReward.key}
+        pieceCount={72}
+        pieceScale={1.7}
+        showMark={false}
+        spread={5}
+        variant="button"
+      />
+      <span className="task-points-bubble" key={`${activeReward.key}:points`}>
+        + {activeReward.points}
+      </span>
+    </div>
+  );
 }
 
 function createInitialQuestionResponses(
@@ -666,6 +747,11 @@ export async function loader({ params, request }: Route.LoaderArgs) {
 export async function action({ params, request }: Route.ActionArgs) {
   const formData = await request.formData();
   const intent = formData.get("intent");
+  const isFetcherRequest = formData.get("mode") === "fetcher";
+  const shouldAnimate = formData.get("animate") === "true";
+  const pointsAwarded = Number(formData.get("pointsAwarded")?.toString() ?? 0);
+  const slotId =
+    formData.get("slotId")?.toString().trim() || params.taskId;
 
   if (intent === "claim") {
     const response = await postApi(
@@ -679,11 +765,13 @@ export async function action({ params, request }: Route.ActionArgs) {
 
     await parseParticipantSessionResponse(response);
 
-    if (formData.get("mode") === "fetcher") {
+    if (isFetcherRequest) {
       return {
-        animationId: `${params.taskId}:${Date.now()}`,
+        animationId: shouldAnimate ? `${slotId}:${Date.now()}` : undefined,
         intent: "claim",
         ok: true,
+        pointsAwarded: shouldAnimate ? pointsAwarded : undefined,
+        slotId,
         taskId: params.taskId,
       };
     }
@@ -702,7 +790,7 @@ export async function action({ params, request }: Route.ActionArgs) {
 
     await parseParticipantSessionResponse(response);
 
-    if (formData.get("mode") === "fetcher") {
+    if (isFetcherRequest) {
       return { intent: "reset", ok: true, taskId: params.taskId };
     }
 
@@ -736,6 +824,17 @@ export async function action({ params, request }: Route.ActionArgs) {
 
     await parseParticipantSessionResponse(response);
 
+    if (isFetcherRequest) {
+      return {
+        animationId: shouldAnimate ? `${slotId}:${Date.now()}` : undefined,
+        intent: "await-auto-verification",
+        ok: true,
+        pointsAwarded: shouldAnimate ? pointsAwarded : undefined,
+        slotId,
+        taskId: params.taskId,
+      };
+    }
+
     return redirect(`/${params.eventSlug}/tasks/${params.taskId}`);
   }
 
@@ -744,15 +843,15 @@ export async function action({ params, request }: Route.ActionArgs) {
 
 export default function EventTask({ loaderData, params }: Route.ComponentProps) {
   const session = loaderData.session;
-  const socialFollowFetcher = useFetcher();
-  const socialFollowFetcherData = socialFollowFetcher.data as
-    | { animationId?: string; intent?: string; ok?: boolean; taskId?: string }
+  const taskActionFetcher = useFetcher();
+  const taskActionFetcherData = taskActionFetcher.data as
+    | TaskActionFetcherData
     | undefined;
-  const lastFollowRewardAnimationId = useRef<string | null>(null);
-  const [activeFollowReward, setActiveFollowReward] = useState<{
+  const lastRewardAnimationId = useRef<string | null>(null);
+  const [activeReward, setActiveReward] = useState<{
     key: string;
     points: number;
-    taskId: string;
+    slotId: string;
   } | null>(null);
 
   if (!session) {
@@ -778,6 +877,18 @@ export default function EventTask({ loaderData, params }: Route.ComponentProps) 
     loaderData,
     taskItem.task.id,
   );
+  const currentTaskStatus = taskItem.attempt?.status ?? "NOT_STARTED";
+  const currentTaskAlreadyClaimed = taskStatusCountsAsClaimed(
+    currentTaskStatus,
+  );
+  const isAwaitingAutoVerification =
+    currentTaskStatus === "PENDING_AUTO_VERIFICATION";
+  const isAutoVerified = currentTaskStatus === "VERIFIED";
+  const completedTaskActionLabel = getCompletedTaskActionLabel({
+    requiresVerification: taskItem.task.requiresVerification,
+    status: currentTaskStatus,
+    taskType: taskItem.task.type,
+  });
   const socialFollowRequiresVerification = socialFollowItems.some(
     (followItem) => followItem.task.requiresVerification,
   );
@@ -907,44 +1018,37 @@ export default function EventTask({ loaderData, params }: Route.ComponentProps) 
 
   useEffect(() => {
     if (
-      socialFollowFetcher.state !== "idle" ||
-      !socialFollowFetcherData?.ok ||
-      socialFollowFetcherData.intent !== "claim" ||
-      !socialFollowFetcherData.animationId ||
-      !socialFollowFetcherData.taskId
+      taskActionFetcher.state !== "idle" ||
+      !taskActionFetcherData?.ok ||
+      !taskActionFetcherData.animationId ||
+      !taskActionFetcherData.slotId
     ) {
       return;
     }
 
-    if (
-      lastFollowRewardAnimationId.current === socialFollowFetcherData.animationId
-    ) {
+    if (lastRewardAnimationId.current === taskActionFetcherData.animationId) {
       return;
     }
 
-    lastFollowRewardAnimationId.current = socialFollowFetcherData.animationId;
-    const claimedFollowItem = socialFollowItems.find(
-      (followItem) => followItem.task.id === socialFollowFetcherData.taskId,
-    );
-
-    setActiveFollowReward({
-      key: socialFollowFetcherData.animationId,
-      points: claimedFollowItem?.task.points ?? 0,
-      taskId: socialFollowFetcherData.taskId,
+    lastRewardAnimationId.current = taskActionFetcherData.animationId;
+    setActiveReward({
+      key: taskActionFetcherData.animationId,
+      points: taskActionFetcherData.pointsAwarded ?? 0,
+      slotId: taskActionFetcherData.slotId,
     });
-  }, [socialFollowFetcher.state, socialFollowFetcherData, socialFollowItems]);
+  }, [taskActionFetcher.state, taskActionFetcherData]);
 
   useEffect(() => {
-    if (!activeFollowReward) {
+    if (!activeReward) {
       return;
     }
 
     const timeout = window.setTimeout(() => {
-      setActiveFollowReward(null);
+      setActiveReward(null);
     }, 2100);
 
     return () => window.clearTimeout(timeout);
-  }, [activeFollowReward]);
+  }, [activeReward]);
 
   return (
     <ScreenShell
@@ -985,9 +1089,12 @@ export default function EventTask({ loaderData, params }: Route.ComponentProps) 
     >
       <div className="space-y-4">
         <div className="card-surface rounded-[2rem] p-5">
-          <h2 className="font-display text-3xl font-semibold text-slate-950">
-            {taskLabel}
-          </h2>
+          <div className="flex items-start justify-between gap-3">
+            <h2 className="font-display text-3xl font-semibold text-slate-950">
+              {taskLabel}
+            </h2>
+            <StatusBadge {...taskItem.status} />
+          </div>
           <p className="mt-4 text-sm leading-6 text-slate-700">
             {taskItem.task.description}
           </p>
@@ -1074,7 +1181,7 @@ export default function EventTask({ loaderData, params }: Route.ComponentProps) 
                           {link.label}
                         </a>
                       ) : null}
-                      <socialFollowFetcher.Form
+                      <taskActionFetcher.Form
                         action={`/${params.eventSlug}/tasks/${followItem.task.id}`}
                         method="post"
                       >
@@ -1083,7 +1190,18 @@ export default function EventTask({ loaderData, params }: Route.ComponentProps) 
                           type="hidden"
                           value={hasClaimedFollow ? "reset" : "claim"}
                         />
+                        <input name="animate" type="hidden" value="true" />
                         <input name="mode" type="hidden" value="fetcher" />
+                        <input
+                          name="pointsAwarded"
+                          type="hidden"
+                          value={followItem.task.points}
+                        />
+                        <input
+                          name="slotId"
+                          type="hidden"
+                          value={`follow:${followItem.task.id}`}
+                        />
                         <input
                           name="status"
                           type="hidden"
@@ -1094,26 +1212,10 @@ export default function EventTask({ loaderData, params }: Route.ComponentProps) 
                           }
                         />
                         <div className="relative">
-                          {activeFollowReward?.taskId === followItem.task.id ? (
-                            <div className="follow-reward-animation">
-                              <CheckmarkBurst
-                                columns={12}
-                                durationScale={1.35}
-                                key={activeFollowReward.key}
-                                pieceCount={72}
-                                pieceScale={1.7}
-                                showMark={false}
-                                spread={5}
-                                variant="button"
-                              />
-                              <span
-                                className="follow-points-bubble"
-                                key={`${activeFollowReward.key}:points`}
-                              >
-                                + {activeFollowReward.points}
-                              </span>
-                            </div>
-                          ) : null}
+                          <TaskRewardAnimation
+                            activeReward={activeReward}
+                            slotId={`follow:${followItem.task.id}`}
+                          />
                           <Button
                             className={[
                               "w-full",
@@ -1145,7 +1247,7 @@ export default function EventTask({ loaderData, params }: Route.ComponentProps) 
                               : `I followed on ${platformLabel}`}
                           </Button>
                         </div>
-                      </socialFollowFetcher.Form>
+                      </taskActionFetcher.Form>
                     </div>
                   </div>
                 );
@@ -1474,19 +1576,45 @@ export default function EventTask({ loaderData, params }: Route.ComponentProps) 
                   analyticsParams={taskAnalyticsParams}
                   value={requiredCommentText}
                 />
-                <Form method="post">
+                <taskActionFetcher.Form method="post">
+                  <input name="animate" type="hidden" value={!currentTaskAlreadyClaimed ? "true" : "false"} />
                   <input name="intent" type="hidden" value="await-auto-verification" />
-                  <Button
-                    data-analytics-event="task_auto_verification_click"
-                    data-analytics-location="task_detail"
-                    {...taskAnalyticsAttributes}
-                    type="submit"
-                  >
-                    {taskItem.attempt?.status === "PENDING_AUTO_VERIFICATION"
-                      ? "Check again"
-                      : "I've commented"}
-                  </Button>
-                </Form>
+                  <input name="mode" type="hidden" value="fetcher" />
+                  <input
+                    name="pointsAwarded"
+                    type="hidden"
+                    value={taskItem.task.points}
+                  />
+                  <input
+                    name="slotId"
+                    type="hidden"
+                    value="task:auto-verification"
+                  />
+                  <div className="relative">
+                    <TaskRewardAnimation
+                      activeReward={activeReward}
+                      slotId="task:auto-verification"
+                    />
+                    <Button
+                      className={
+                        isAwaitingAutoVerification || isAutoVerified
+                          ? "!bg-sky-500 !text-white !shadow-[0_16px_40px_-24px_rgba(14,165,233,0.85)]"
+                          : ""
+                      }
+                      data-analytics-event="task_auto_verification_click"
+                      data-analytics-location="task_detail"
+                      disabled={isAutoVerified}
+                      {...taskAnalyticsAttributes}
+                      type="submit"
+                    >
+                      {isAutoVerified
+                        ? "Comment verified"
+                        : isAwaitingAutoVerification
+                          ? "Comment submitted"
+                          : "I've commented"}
+                    </Button>
+                  </div>
+                </taskActionFetcher.Form>
               </div>
               <div className="mt-4 rounded-2xl bg-white/70 p-4 text-sm leading-6 text-slate-700">
                 {taskItem.attempt?.status === "VERIFIED"
@@ -1506,34 +1634,73 @@ export default function EventTask({ loaderData, params }: Route.ComponentProps) 
                 ))}
               </ol>
               <div className="mt-6 flex flex-wrap gap-3">
-                <Form method="post">
+                <taskActionFetcher.Form method="post">
+                  <input name="animate" type="hidden" value={!currentTaskAlreadyClaimed ? "true" : "false"} />
                   <input name="intent" type="hidden" value="claim" />
+                  <input name="mode" type="hidden" value="fetcher" />
+                  <input
+                    name="pointsAwarded"
+                    type="hidden"
+                    value={taskItem.task.points}
+                  />
+                  <input name="slotId" type="hidden" value="task:primary-claim" />
                   <input name="status" type="hidden" value="COMPLETED_BY_USER" />
-                  <Button
-                    data-analytics-claim-path="completed_by_user"
-                    data-analytics-event="task_claim_click"
-                    data-analytics-location="task_detail"
-                    {...taskAnalyticsAttributes}
-                    type="submit"
-                  >
-                    {getTaskPrimaryActionLabel(taskItem.task)}
-                  </Button>
-                </Form>
-                {taskItem.task.requiresVerification ? (
-                  <Form method="post">
-                    <input name="intent" type="hidden" value="claim" />
-                    <input name="status" type="hidden" value="PENDING_STAFF_CHECK" />
+                  <div className="relative">
+                    <TaskRewardAnimation
+                      activeReward={activeReward}
+                      slotId="task:primary-claim"
+                    />
                     <Button
-                      data-analytics-claim-path="pending_staff_check"
+                      className={
+                        currentTaskAlreadyClaimed
+                          ? "!bg-sky-500 !text-white !shadow-[0_16px_40px_-24px_rgba(14,165,233,0.85)]"
+                          : ""
+                      }
+                      data-analytics-claim-path="completed_by_user"
                       data-analytics-event="task_claim_click"
                       data-analytics-location="task_detail"
+                      disabled={currentTaskAlreadyClaimed}
                       {...taskAnalyticsAttributes}
-                      tone="secondary"
                       type="submit"
                     >
-                      {getTaskSecondaryActionLabel(taskItem.task)}
+                      {completedTaskActionLabel ??
+                        getTaskPrimaryActionLabel(taskItem.task)}
                     </Button>
-                  </Form>
+                  </div>
+                </taskActionFetcher.Form>
+                {taskItem.task.requiresVerification ? (
+                  <taskActionFetcher.Form method="post">
+                    <input name="animate" type="hidden" value={!currentTaskAlreadyClaimed ? "true" : "false"} />
+                    <input name="intent" type="hidden" value="claim" />
+                    <input name="mode" type="hidden" value="fetcher" />
+                    <input
+                      name="pointsAwarded"
+                      type="hidden"
+                      value={taskItem.task.points}
+                    />
+                    <input
+                      name="slotId"
+                      type="hidden"
+                      value="task:secondary-claim"
+                    />
+                    <input name="status" type="hidden" value="PENDING_STAFF_CHECK" />
+                    <div className="relative">
+                      <TaskRewardAnimation
+                        activeReward={activeReward}
+                        slotId="task:secondary-claim"
+                      />
+                      <Button
+                        data-analytics-claim-path="pending_staff_check"
+                        data-analytics-event="task_claim_click"
+                        data-analytics-location="task_detail"
+                        {...taskAnalyticsAttributes}
+                        tone="secondary"
+                        type="submit"
+                      >
+                        {getTaskSecondaryActionLabel(taskItem.task)}
+                      </Button>
+                    </div>
+                  </taskActionFetcher.Form>
                 ) : null}
               </div>
             </>

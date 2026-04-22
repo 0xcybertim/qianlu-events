@@ -4,7 +4,12 @@ import { Link, redirect } from "react-router";
 
 import type { Route } from "./+types/admin-event-leads";
 import { fetchAdminEvent, fetchAdminLeads } from "../lib/api.server";
+import { buildPageTitle } from "../lib/meta";
 import { AdminCard, AdminShell } from "../components/admin-shell";
+
+export function meta({ params }: Route.MetaArgs) {
+  return [{ title: buildPageTitle("Leads", params.eventSlug) }];
+}
 
 function formatDate(value: string | null) {
   if (!value) {

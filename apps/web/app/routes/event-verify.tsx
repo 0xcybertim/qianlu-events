@@ -9,7 +9,12 @@ import {
 } from "../lib/api.server";
 import { getBrandingStyle } from "../lib/branding";
 import { getStatusMeta, mapTaskAttempts } from "../lib/experience";
+import { buildPageTitle } from "../lib/meta";
 import { ScreenShell } from "../components/screen-shell";
+
+export function meta({ params }: Route.MetaArgs) {
+  return [{ title: buildPageTitle("Verify Activities", params.eventSlug) }];
+}
 
 export async function loader({ params, request }: Route.LoaderArgs) {
   return fetchExperience(params.eventSlug, request);

@@ -10,6 +10,7 @@ import {
 } from "../lib/api.server";
 import { getBrandingStyle } from "../lib/branding";
 import { getParticipantContactReasonText } from "../lib/experience";
+import { buildPageTitle } from "../lib/meta";
 import { trackParticipantAnalyticsEvent } from "../lib/marketing";
 import { ScreenShell } from "../components/screen-shell";
 
@@ -22,6 +23,10 @@ const clerkSecretKey = import.meta.env.SSR
 const clerkEnabled =
   Boolean(clerkPublishableKey) &&
   (import.meta.env.SSR ? Boolean(clerkSecretKey) : true);
+
+export function meta({ params }: Route.MetaArgs) {
+  return [{ title: buildPageTitle("Account", params.eventSlug) }];
+}
 
 export async function loader({ params, request }: Route.LoaderArgs) {
   return fetchExperience(params.eventSlug, request);

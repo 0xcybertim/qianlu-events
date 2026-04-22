@@ -3,12 +3,17 @@ import { Form, redirect } from "react-router";
 
 import type { Route } from "./+types/admin-event-marketing";
 import { fetchAdminEvent, updateAdminEvent } from "../lib/api.server";
+import { buildPageTitle } from "../lib/meta";
 import {
   AdminCard,
   AdminField,
   AdminShell,
   adminInputClass,
 } from "../components/admin-shell";
+
+export function meta({ params }: Route.MetaArgs) {
+  return [{ title: buildPageTitle("Marketing", params.eventSlug) }];
+}
 
 function maskPixelId(pixelId: string) {
   if (pixelId.length <= 4) {

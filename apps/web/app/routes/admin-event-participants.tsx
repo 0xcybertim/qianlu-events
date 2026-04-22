@@ -3,7 +3,12 @@ import { redirect } from "react-router";
 
 import type { Route } from "./+types/admin-event-participants";
 import { fetchAdminEvent, fetchAdminParticipants } from "../lib/api.server";
+import { buildPageTitle } from "../lib/meta";
 import { AdminCard, AdminShell } from "../components/admin-shell";
+
+export function meta({ params }: Route.MetaArgs) {
+  return [{ title: buildPageTitle("Participants", params.eventSlug) }];
+}
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat("en", {

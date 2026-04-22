@@ -6,10 +6,15 @@ import { BrowserQRCodeReader, type IScannerControls } from "@zxing/browser";
 import type { Route } from "./+types/event-scan-camera";
 import { fetchExperience } from "../lib/api.server";
 import { getBrandingStyle } from "../lib/branding";
+import { buildPageTitle } from "../lib/meta";
 import { trackParticipantAnalyticsEvent } from "../lib/marketing";
 import { ScreenShell } from "../components/screen-shell";
 
 type ScannerState = "idle" | "starting" | "scanning" | "found" | "error";
+
+export function meta({ params }: Route.MetaArgs) {
+  return [{ title: buildPageTitle("Scan Camera", params.eventSlug) }];
+}
 
 function isLocalHost(hostname: string) {
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";

@@ -12,15 +12,9 @@ import {
   getRewardTypes,
   mapTaskAttempts,
 } from "../lib/experience";
+import { buildPageTitle, humanizeSlug } from "../lib/meta";
 import { summarizeAnalyticsCounts } from "../lib/marketing";
 import { ScreenShell } from "../components/screen-shell";
-
-function humanizeSlug(slug: string) {
-  return slug
-    .split("-")
-    .map((chunk) => chunk.charAt(0).toUpperCase() + chunk.slice(1))
-    .join(" ");
-}
 
 function formatVerificationCode(code: string) {
   return code.replace(/(.{3})/g, "$1 ").trim();
@@ -99,9 +93,7 @@ function InstantRewardStateIcon({
 }
 
 export function meta({ params }: Route.MetaArgs) {
-  const name = humanizeSlug(params.eventSlug ?? "event");
-
-  return [{ title: `${name} | Qianlu Events` }];
+  return [{ title: buildPageTitle("Overview", params.eventSlug) }];
 }
 
 export async function loader({ params, request }: Route.LoaderArgs) {
@@ -497,24 +489,6 @@ export default function EventLanding({ loaderData, params }: Route.ComponentProp
             to={`/${params.eventSlug}/tasks`}
           >
             Open activities
-          </Link>
-          <Link
-            className="action-link action-link-secondary"
-            data-analytics-cta-name="scan_stamp_qr"
-            data-analytics-event="landing_cta_click"
-            data-analytics-location="footer"
-            to={`/${params.eventSlug}/scan`}
-          >
-            Scan stamp QR
-          </Link>
-          <Link
-            className="action-link action-link-secondary"
-            data-analytics-cta-name="show_summary_screen"
-            data-analytics-event="landing_cta_click"
-            data-analytics-location="footer"
-            to={`/${params.eventSlug}/summary`}
-          >
-            Show summary screen
           </Link>
         </div>
       </div>

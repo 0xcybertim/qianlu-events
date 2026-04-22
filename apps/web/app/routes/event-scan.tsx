@@ -4,8 +4,13 @@ import { qrScanResultSchema } from "@qianlu-events/schemas";
 import type { Route } from "./+types/event-scan";
 import { fetchExperience, postApi } from "../lib/api.server";
 import { getBrandingStyle } from "../lib/branding";
+import { buildPageTitle } from "../lib/meta";
 import { CheckmarkBurst } from "../components/checkmark-burst";
 import { ScreenShell } from "../components/screen-shell";
+
+export function meta({ params }: Route.MetaArgs) {
+  return [{ title: buildPageTitle("Scan Stamp QR", params.eventSlug) }];
+}
 
 function requestWithSetCookie(request: Request, setCookie: string | null) {
   if (!setCookie) {

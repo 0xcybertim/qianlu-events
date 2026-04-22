@@ -7,7 +7,12 @@ import {
   forwardSetCookie,
   loginAdmin,
 } from "../lib/api.server";
+import { buildPageTitle } from "../lib/meta";
 import { AdminCard, AdminField, AdminShell, adminInputClass } from "../components/admin-shell";
+
+export function meta({}: Route.MetaArgs) {
+  return [{ title: buildPageTitle("Admin Login") }];
+}
 
 export async function loader({ request }: Route.LoaderArgs) {
   try {

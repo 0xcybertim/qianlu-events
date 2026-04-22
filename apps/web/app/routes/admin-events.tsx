@@ -3,12 +3,17 @@ import { Form, Link, redirect } from "react-router";
 
 import type { Route } from "./+types/admin-events";
 import { createAdminEvent, fetchAdminEvents } from "../lib/api.server";
+import { buildPageTitle } from "../lib/meta";
 import {
   AdminCard,
   AdminField,
   AdminShell,
   adminInputClass,
 } from "../components/admin-shell";
+
+export function meta({}: Route.MetaArgs) {
+  return [{ title: buildPageTitle("Events") }];
+}
 
 const defaultBranding = {
   primary: "#0f6d53",

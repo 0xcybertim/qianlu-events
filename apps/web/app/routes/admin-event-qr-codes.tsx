@@ -9,12 +9,17 @@ import {
   fetchAdminEvent,
   fetchAdminQrCodes,
 } from "../lib/api.server";
+import { buildPageTitle } from "../lib/meta";
 import {
   AdminCard,
   AdminField,
   AdminShell,
   adminInputClass,
 } from "../components/admin-shell";
+
+export function meta({ params }: Route.MetaArgs) {
+  return [{ title: buildPageTitle("QR Codes", params.eventSlug) }];
+}
 
 function formatDate(value: string | null) {
   if (!value) {

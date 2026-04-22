@@ -9,11 +9,16 @@ import {
 } from "../lib/api.server";
 import { getBrandingStyle } from "../lib/branding";
 import { getStatusMeta, mapTaskAttempts } from "../lib/experience";
+import { buildPageTitle } from "../lib/meta";
 import {
   getTaskCategoryLabel,
   getTaskProofHint,
 } from "../lib/task-presentation";
 import { ScreenShell } from "../components/screen-shell";
+
+export function meta({ params }: Route.MetaArgs) {
+  return [{ title: buildPageTitle("Staff Verification", params.eventSlug) }];
+}
 
 function normalizeCodeInput(code: string) {
   return code.replace(/[\s-]/g, "").toUpperCase();
