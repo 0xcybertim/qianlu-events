@@ -1127,15 +1127,23 @@ export default function EventTask({ loaderData, params }: Route.ComponentProps) 
     >
       <div className="space-y-4">
         <div className="card-surface rounded-[2rem] p-5">
-          <div className="flex items-start justify-between gap-3">
-            <h2 className="font-display text-3xl font-semibold text-slate-950">
-              {taskLabel}
-            </h2>
-            <StatusBadge {...taskItem.status} />
-          </div>
-          <p className="mt-4 text-sm leading-6 text-slate-700">
-            {taskItem.task.description}
-          </p>
+          {handlesInlineForm ? (
+            <div className="flex justify-end">
+              <StatusBadge {...taskItem.status} />
+            </div>
+          ) : (
+            <>
+              <div className="flex items-start justify-between gap-3">
+                <h2 className="font-display text-3xl font-semibold text-slate-950">
+                  {taskLabel}
+                </h2>
+                <StatusBadge {...taskItem.status} />
+              </div>
+              <p className="mt-4 text-sm leading-6 text-slate-700">
+                {taskItem.task.description}
+              </p>
+            </>
+          )}
           {taskInstantReward && !showRewardBelowContent ? (
             <div className="mt-5">
               <LinkedInstantRewardCard reward={taskInstantReward} />
