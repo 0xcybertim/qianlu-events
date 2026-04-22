@@ -166,3 +166,32 @@ test("optimistic tasks count previously claimed attempts as verified", () => {
     },
   ]);
 });
+
+test("daily draw uses claimed points for raffle eligibility", () => {
+  const snapshot = calculateRewardSnapshot({
+    tasks: [
+      {
+        id: "task-photo",
+        platform: "IN_PERSON",
+        points: 5,
+        requiresVerification: true,
+        title: "Show product photo",
+        type: "PHOTO_PROOF",
+        verificationType: "VISUAL_STAFF_CHECK",
+      },
+    ],
+    attempts: [
+      {
+        status: "PENDING_STAFF_CHECK",
+        taskId: "task-photo",
+      },
+    ],
+    instantRewards: [],
+    rewardTiers: [],
+    rewardTypes: ["DAILY_PRIZE_DRAW"],
+  });
+
+  assert.equal(snapshot.claimedPoints, 5);
+  assert.equal(snapshot.verifiedPoints, 0);
+  assert.equal(snapshot.dailyDrawEligible, true);
+});

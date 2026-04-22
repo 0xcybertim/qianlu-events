@@ -64,6 +64,36 @@ function parseInstantRewards(formData: FormData) {
     .filter((reward) => reward.key && reward.label);
 }
 
+function parseParticipantMessaging(
+  formData: FormData,
+  currentMessaging?: {
+    laterPrizeLabel?: string;
+    prizeDrawDescription?: string;
+    prizeDrawItems?: string[];
+    prizeDrawLabel?: string;
+    saveProgressMessage?: string;
+  } | null,
+) {
+  const prizeDrawLabel = formData.get("prizeDrawLabel")?.toString().trim();
+  const prizeDrawDescription = formData
+    .get("prizeDrawDescription")
+    ?.toString()
+    .trim();
+  const prizeDrawItems = formData
+    .get("prizeDrawItems")
+    ?.toString()
+    .split("\n")
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  return {
+    ...currentMessaging,
+    prizeDrawDescription: prizeDrawDescription || undefined,
+    prizeDrawItems: prizeDrawItems ?? currentMessaging?.prizeDrawItems ?? [],
+    prizeDrawLabel: prizeDrawLabel || undefined,
+  };
+}
+
 export async function loader({ params, request }: Route.LoaderArgs) {
   try {
     const [event, rewards] = await Promise.all([
@@ -91,7 +121,10 @@ export async function action({ params, request }: Route.ActionArgs) {
       {
         settingsJson: {
           marketing: currentEvent.settingsJson?.marketing,
-          participantMessaging: currentEvent.settingsJson?.participantMessaging,
+          participantMessaging: parseParticipantMessaging(
+            formData,
+            currentEvent.settingsJson?.participantMessaging,
+          ),
           rewardTypes: currentEvent.settingsJson?.rewardTypes ?? [],
           rewardTiers: parseRewardTiers(formData),
           instantRewards: parseInstantRewards(formData),
@@ -134,10 +167,16 @@ export default function AdminEventRewards({
       taskMatchMode: "ANY" as const,
     },
   ];
+  const participantMessaging = event.settingsJson?.participantMessaging;
+  const prizeDrawLabel = participantMessaging?.prizeDrawLabel ?? "End-of-event raffle";
+  const prizeDrawDescription =
+    participantMessaging?.prizeDrawDescription ??
+    "Every claimed point becomes a raffle entry. The winner is selected at the end of the event.";
+  const prizeDrawItems = participantMessaging?.prizeDrawItems ?? [];
 
   return (
     <AdminShell
-      description="Review instant reward, tier reward, and daily draw eligibility."
+      description="Review instant rewards, tier rewards, and point-weighted raffle entrants."
       eventSlug={event.slug}
       title={`${event.name} rewards`}
     >
@@ -153,7 +192,7 @@ export default function AdminEventRewards({
           </AdminCard>
           <AdminCard>
             <p className="text-xs uppercase tracking-[0.14em] text-slate-500">
-              Daily draw eligible
+              {prizeDrawLabel} entrants
             </p>
             <p className="mt-2 font-display text-3xl font-semibold">
               {rewards.dailyDrawEligibleCount}
@@ -166,9 +205,9 @@ export default function AdminEventRewards({
             Reward configuration
           </h2>
           <p className="mt-2 text-sm leading-6 text-slate-600">
-            Define point tiers and task-linked instant rewards here. Instant
-            rewards can unlock when any linked task is done or only when all linked
-            tasks are done.
+            Define point tiers, point-weighted raffle messaging, and task-linked
+            instant rewards here. Instant rewards can unlock when any linked task
+            is done or only when all linked tasks are done.
           </p>
           <Form
             action={`/admin/events/${event.slug}/rewards`}
@@ -226,6 +265,49 @@ export default function AdminEventRewards({
                     />
                   </div>
                 ))}
+              </div>
+            </div>
+
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                Raffle reward
+              </p>
+              <div className="mt-3 rounded-lg border border-[var(--color-border)] bg-white/70 p-4">
+                <p className="text-sm leading-6 text-slate-600">
+                  Use the existing daily draw system as a weighted raffle. Each
+                  claimed point becomes one raffle entry.
+                </p>
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <AdminField label="Raffle label">
+                    <input
+                      className={adminInputClass}
+                      defaultValue={prizeDrawLabel}
+                      name="prizeDrawLabel"
+                      placeholder="End-of-event raffle"
+                    />
+                  </AdminField>
+                  <AdminField label="Description">
+                    <input
+                      className={adminInputClass}
+                      defaultValue={prizeDrawDescription}
+                      name="prizeDrawDescription"
+                      placeholder="Every point increases your chance of winning."
+                    />
+                  </AdminField>
+                </div>
+                <div className="mt-4">
+                  <AdminField label="Prizes">
+                    <textarea
+                      className={`${adminInputClass} min-h-28`}
+                      defaultValue={prizeDrawItems.join("\n")}
+                      name="prizeDrawItems"
+                      placeholder={"Weekend trip\nVIP shopping voucher\nProduct bundle"}
+                    />
+                  </AdminField>
+                </div>
+                <p className="mt-2 text-xs text-slate-500">
+                  Add one prize per line.
+                </p>
               </div>
             </div>
 
@@ -519,7 +601,7 @@ export default function AdminEventRewards({
 
         <AdminCard>
           <h2 className="font-display text-xl font-semibold">
-            Daily draw eligible participants
+            {prizeDrawLabel} participants
           </h2>
           <div className="mt-4 grid gap-3">
             {rewards.eligibleParticipants.dailyDraw.length > 0 ? (
@@ -538,14 +620,14 @@ export default function AdminEventRewards({
                     </p>
                   </div>
                   <StatusBadge
-                    label={`${participant.verifiedPoints} verified pts`}
+                    label={`${participant.claimedPoints} entr${participant.claimedPoints === 1 ? "y" : "ies"}`}
                     tone="verified"
                   />
                 </div>
               ))
             ) : (
               <p className="text-sm text-slate-700">
-                No participants are daily draw eligible yet.
+                No participants have raffle entries yet.
               </p>
             )}
           </div>

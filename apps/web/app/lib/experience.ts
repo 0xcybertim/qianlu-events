@@ -92,6 +92,27 @@ export function getParticipantContactReasonText(
   return "save your progress";
 }
 
+export function getPrizeDrawLabel(
+  settings: EventSettings | null | undefined,
+) {
+  return cleanLabel(settings?.participantMessaging?.prizeDrawLabel) ?? "Raffle";
+}
+
+export function getPrizeDrawDescription(
+  settings: EventSettings | null | undefined,
+) {
+  return (
+    cleanLabel(settings?.participantMessaging?.prizeDrawDescription) ??
+    "Every point gives you another entry. The winner is selected at the end of the event."
+  );
+}
+
+export function getPrizeDrawItems(
+  settings: EventSettings | null | undefined,
+) {
+  return (settings?.participantMessaging?.prizeDrawItems ?? []).filter(Boolean);
+}
+
 export function getStatusMeta(status: TaskAttemptStatus) {
   switch (status) {
     case "VERIFIED":

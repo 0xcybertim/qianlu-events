@@ -71,6 +71,8 @@ export const rewardTierSchema = z.object({
 export const participantMessagingSchema = z.object({
   saveProgressMessage: z.string().trim().min(1).optional(),
   prizeDrawLabel: z.string().trim().min(1).optional(),
+  prizeDrawDescription: z.string().trim().min(1).optional(),
+  prizeDrawItems: z.array(z.string().trim().min(1)).default([]),
   laterPrizeLabel: z.string().trim().min(1).optional(),
 });
 

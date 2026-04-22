@@ -4,7 +4,14 @@ import { StatusBadge } from "@qianlu-events/ui";
 import type { Route } from "./+types/event-summary";
 import { fetchExperience } from "../lib/api.server";
 import { getBrandingStyle } from "../lib/branding";
-import { getInstantRewardStates, mapTaskAttempts } from "../lib/experience";
+import {
+  getInstantRewardStates,
+  getPrizeDrawDescription,
+  getPrizeDrawItems,
+  getPrizeDrawLabel,
+  getRewardTypes,
+  mapTaskAttempts,
+} from "../lib/experience";
 import { summarizeAnalyticsCounts } from "../lib/marketing";
 import { ScreenShell } from "../components/screen-shell";
 
@@ -98,11 +105,16 @@ export default function EventSummary({ loaderData, params }: Route.ComponentProp
   }
 
   const allRows = mapTaskAttempts(loaderData);
+  const rewardTypes = getRewardTypes(loaderData);
   const instantRewards = getInstantRewardStates(loaderData);
   const unlockedInstantRewards = instantRewards.filter((reward) => reward.verified);
   const pendingInstantRewards = instantRewards.filter(
     (reward) => reward.eligible && !reward.verified,
   );
+  const hasPrizeDraw = rewardTypes.includes("DAILY_PRIZE_DRAW");
+  const prizeDrawLabel = getPrizeDrawLabel(loaderData.event.settingsJson);
+  const prizeDrawDescription = getPrizeDrawDescription(loaderData.event.settingsJson);
+  const prizeDrawItems = getPrizeDrawItems(loaderData.event.settingsJson);
   const summaryRows = allRows.slice(0, 6);
   const themeStyle = getBrandingStyle(loaderData);
   const needsReviewCount = summaryRows.filter((row) =>
@@ -195,11 +207,11 @@ export default function EventSummary({ loaderData, params }: Route.ComponentProp
             <span className="rounded-full bg-white/14 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em]">
               Tier unlocked: {session.rewardTier ?? "Not unlocked"}
             </span>
-            <span className="rounded-full bg-white/14 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em]">
-              {session.dailyDrawEligible
-                ? "Daily draw eligible"
-                : "Daily draw locked"}
-            </span>
+            {hasPrizeDraw ? (
+              <span className="rounded-full bg-white/14 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em]">
+                {prizeDrawLabel}: {session.claimedPoints} entr{session.claimedPoints === 1 ? "y" : "ies"}
+              </span>
+            ) : null}
             {unlockedInstantRewards.length > 0 ? (
               <span className="rounded-full bg-white/14 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em]">
                 Instant rewards: {unlockedInstantRewards.length}
@@ -228,6 +240,42 @@ export default function EventSummary({ loaderData, params }: Route.ComponentProp
             <p className="mt-2 font-display text-2xl font-semibold">{rejectedCount}</p>
           </div>
         </div>
+
+        {hasPrizeDraw ? (
+          <div className="card-surface rounded-[2rem] p-5">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--color-primary)]">
+                  Raffle
+                </p>
+                <h2 className="mt-3 font-display text-2xl font-semibold">
+                  {prizeDrawLabel}
+                </h2>
+              </div>
+              <span className="rounded-full bg-slate-950 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-white">
+                {session.claimedPoints} entr{session.claimedPoints === 1 ? "y" : "ies"}
+              </span>
+            </div>
+            <p className="mt-4 text-sm leading-6 text-slate-700">
+              {prizeDrawDescription}
+            </p>
+            {prizeDrawItems.length > 0 ? (
+              <div className="mt-4 rounded-2xl bg-white/70 px-4 py-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-primary)]">
+                  Prizes
+                </p>
+                <ul className="mt-3 space-y-2 text-sm leading-6 text-slate-700">
+                  {prizeDrawItems.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            <p className="mt-3 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-primary)]">
+              Every point increases the chance of winning.
+            </p>
+          </div>
+        ) : null}
 
         <div className="card-surface rounded-[2rem] p-5">
           <div className="flex items-center justify-between gap-4">

@@ -212,7 +212,7 @@ export function calculateRewardSnapshot(args: {
     highestClaimedTier,
     highestVerifiedTier,
     dailyDrawEligible:
-      args.rewardTypes.includes("DAILY_PRIZE_DRAW") && verifiedPoints > 0,
+      args.rewardTypes.includes("DAILY_PRIZE_DRAW") && claimedPoints > 0,
     instantRewardEligible:
       args.rewardTypes.includes("INSTANT_REWARD") &&
       (highestVerifiedTier !== null || hasVerifiedInstantReward),

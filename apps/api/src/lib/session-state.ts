@@ -144,7 +144,7 @@ export async function recalculateSessionState(sessionId: string) {
                       rewardKey: "daily-draw",
                       eligible: snapshot.dailyDrawEligible,
                       verified: snapshot.dailyDrawEligible,
-                      reason: "Daily draw entries require verified participation.",
+                      reason: "Raffle entries are based on claimed points.",
                     },
                   ]
                 : []),

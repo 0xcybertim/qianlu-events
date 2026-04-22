@@ -79,8 +79,8 @@ export default function AdminEventParticipants({
                   <StatusBadge
                     label={
                       participant.dailyDrawEligible
-                        ? "Draw eligible"
-                        : "Draw locked"
+                        ? "Raffle active"
+                        : "Raffle locked"
                     }
                     tone={participant.dailyDrawEligible ? "verified" : "neutral"}
                   />

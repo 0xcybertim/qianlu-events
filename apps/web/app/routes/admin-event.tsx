@@ -49,21 +49,36 @@ function parseRewardTiers(formData: FormData) {
     .filter((tier) => tier.key && tier.label && Number.isFinite(tier.threshold));
 }
 
-function parseParticipantMessaging(formData: FormData) {
+function parseParticipantMessaging(
+  formData: FormData,
+  currentMessaging?: {
+    laterPrizeLabel?: string;
+    prizeDrawDescription?: string;
+    prizeDrawItems?: string[];
+    prizeDrawLabel?: string;
+    saveProgressMessage?: string;
+  } | null,
+) {
   const saveProgressMessage =
     formData.get("saveProgressMessage")?.toString().trim() ?? "";
   const prizeDrawLabel = formData.get("prizeDrawLabel")?.toString().trim() ?? "";
   const laterPrizeLabel =
     formData.get("laterPrizeLabel")?.toString().trim() ?? "";
 
-  if (!saveProgressMessage && !prizeDrawLabel && !laterPrizeLabel) {
+  if (
+    !saveProgressMessage &&
+    !prizeDrawLabel &&
+    !laterPrizeLabel &&
+    !currentMessaging?.prizeDrawDescription
+  ) {
     return undefined;
   }
 
   return {
-    ...(saveProgressMessage ? { saveProgressMessage } : {}),
-    ...(prizeDrawLabel ? { prizeDrawLabel } : {}),
-    ...(laterPrizeLabel ? { laterPrizeLabel } : {}),
+    ...currentMessaging,
+    saveProgressMessage: saveProgressMessage || undefined,
+    prizeDrawLabel: prizeDrawLabel || undefined,
+    laterPrizeLabel: laterPrizeLabel || undefined,
   };
 }
 
@@ -100,7 +115,10 @@ export async function action({ params, request }: Route.ActionArgs) {
             .map((value) => value.toString()),
           rewardTiers: parseRewardTiers(formData),
           instantRewards: currentEvent.settingsJson?.instantRewards ?? [],
-          participantMessaging: parseParticipantMessaging(formData),
+          participantMessaging: parseParticipantMessaging(
+            formData,
+            currentEvent.settingsJson?.participantMessaging,
+          ),
         },
       },
       request,

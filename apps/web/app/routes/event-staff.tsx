@@ -237,9 +237,7 @@ export default function EventStaff({
                     : "Instant reward locked"}
                 </span>
                 <span className="rounded-full bg-white/14 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em]">
-                  {session.dailyDrawEligible
-                    ? "Daily draw eligible"
-                    : "Daily draw locked"}
+                  {session.dailyDrawEligible ? "Raffle active" : "Raffle locked"}
                 </span>
               </div>
             </div>

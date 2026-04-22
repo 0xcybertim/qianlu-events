@@ -7,7 +7,11 @@ import { getBrandingStyle } from "../lib/branding";
 import {
   getInstantRewardStates,
   getParticipantContactBannerText,
+  getPrizeDrawDescription,
+  getPrizeDrawItems,
+  getPrizeDrawLabel,
   getRewardTiers,
+  getRewardTypes,
   mapTaskAttempts,
 } from "../lib/experience";
 import {
@@ -131,11 +135,16 @@ export default function EventTasks({ loaderData, params }: Route.ComponentProps)
   const rewardTiers = [...getRewardTiers(loaderData)].sort(
     (firstTier, secondTier) => firstTier.threshold - secondTier.threshold,
   );
+  const rewardTypes = getRewardTypes(loaderData);
   const instantRewards = getInstantRewardStates(loaderData);
   const unlockedInstantRewards = instantRewards.filter((reward) => reward.verified);
   const pendingInstantRewards = instantRewards.filter(
     (reward) => reward.eligible && !reward.verified,
   );
+  const hasPrizeDraw = rewardTypes.includes("DAILY_PRIZE_DRAW");
+  const prizeDrawLabel = getPrizeDrawLabel(loaderData.event.settingsJson);
+  const prizeDrawDescription = getPrizeDrawDescription(loaderData.event.settingsJson);
+  const prizeDrawItems = getPrizeDrawItems(loaderData.event.settingsJson);
   const nextRewardTier =
     rewardTiers.find((tier) => session.claimedPoints < tier.threshold) ?? null;
   const themeStyle = getBrandingStyle(loaderData);
@@ -264,11 +273,51 @@ export default function EventTasks({ loaderData, params }: Route.ComponentProps)
             <span className="rounded-full bg-white/16 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em]">
               Tier: {session.rewardTier ?? "Not unlocked"}
             </span>
-            <span className="rounded-full bg-white/16 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em]">
-              Raffle: {session.dailyDrawEligible ? "Active" : "Locked"}
-            </span>
+            {hasPrizeDraw ? (
+              <span className="rounded-full bg-white/16 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em]">
+                {prizeDrawLabel}: {session.claimedPoints} entr{session.claimedPoints === 1 ? "y" : "ies"}
+              </span>
+            ) : null}
           </div>
         </div>
+
+        {hasPrizeDraw ? (
+          <div className="card-surface rounded-[2rem] p-5">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--color-primary)]">
+                  Raffle
+                </p>
+                <h2 className="mt-2 font-display text-2xl font-semibold text-slate-950">
+                  {prizeDrawLabel}
+                </h2>
+              </div>
+              <span className="rounded-full bg-[var(--color-primary)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-[var(--color-primary-contrast)]">
+                {session.claimedPoints} entr{session.claimedPoints === 1 ? "y" : "ies"}
+              </span>
+            </div>
+            <p className="mt-4 text-sm leading-6 text-slate-700">
+              {prizeDrawDescription}
+            </p>
+            {prizeDrawItems.length > 0 ? (
+              <div className="mt-4 rounded-2xl bg-white/70 px-4 py-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-primary)]">
+                  Prizes
+                </p>
+                <ul className="mt-3 space-y-2 text-sm leading-6 text-slate-700">
+                  {prizeDrawItems.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            <p className="mt-3 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-primary)]">
+              {session.claimedPoints > 0
+                ? "Keep earning points to increase your chance of winning."
+                : "Complete your first activity to start collecting raffle entries."}
+            </p>
+          </div>
+        ) : null}
 
         {instantRewards.length > 0 ? (
           <div className="card-surface rounded-[2rem] p-5">
