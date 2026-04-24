@@ -129,11 +129,12 @@ function getConfiguredInstantRewards(args: {
   );
 
   return args.instantRewards.map((reward) => {
+    const taskMatchMode: InstantRewardMatchMode = "ALL";
     const linkedTasks = args.tasks.filter((task) => reward.taskIds.includes(task.id));
     const matchState = calculateMatchState({
       attemptsByTaskId,
       linkedTasks,
-      taskMatchMode: reward.taskMatchMode,
+      taskMatchMode,
     });
 
     return {
@@ -141,7 +142,7 @@ function getConfiguredInstantRewards(args: {
       label: reward.label,
       ...(reward.description ? { description: reward.description } : {}),
       taskIds: reward.taskIds,
-      taskMatchMode: reward.taskMatchMode,
+      taskMatchMode,
       eligible: matchState.eligible,
       verified: matchState.verified,
     } satisfies InstantRewardState;

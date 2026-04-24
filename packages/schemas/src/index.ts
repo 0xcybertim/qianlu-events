@@ -81,7 +81,7 @@ export const instantRewardRuleSchema = z.object({
   label: z.string().trim().min(1),
   description: z.string().trim().min(1).optional(),
   taskIds: z.array(z.string()).default([]),
-  taskMatchMode: instantRewardMatchModeSchema.default("ANY"),
+  taskMatchMode: instantRewardMatchModeSchema.default("ALL"),
 });
 
 export const eventMarketingSchema = z
@@ -219,6 +219,7 @@ export const taskConfigSchema = z.object({
   secondaryUrl: z.string().url().optional(),
   primaryLabel: z.string().trim().min(1).optional(),
   secondaryLabel: z.string().trim().min(1).optional(),
+  socialFollowGroupKey: z.string().trim().min(1).optional(),
   instantRewardLabel: z.string().trim().min(1).optional(),
   instantRewardDescription: z.string().trim().min(1).optional(),
   proofHint: z.string().trim().min(1).optional(),

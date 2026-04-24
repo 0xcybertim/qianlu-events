@@ -6,7 +6,7 @@ import type { FormQuestion, FormQuestionGroup } from "@qianlu-events/schemas";
 import type { Route } from "./+types/admin-event-tasks";
 import {
   createAdminTask,
-  disableAdminTask,
+  deleteAdminTask,
   fetchAdminEvent,
   fetchAdminFacebookCommentDebug,
   fetchAdminFacebookConnectionDebug,
@@ -28,6 +28,7 @@ import {
   AdminShell,
   adminInputClass,
 } from "../components/admin-shell";
+import { getSocialFollowGroupKey } from "../lib/social-follow";
 
 export function meta({ params }: Route.MetaArgs) {
   return [{ title: buildPageTitle("Tasks", params.eventSlug) }];
@@ -561,6 +562,10 @@ const verificationModeOptions = [
 
 function getDefaultSocialFollowTitle() {
   return "Follow us on socials";
+}
+
+function createSocialFollowGroupKey() {
+  return globalThis.crypto?.randomUUID?.() ?? `social-follow-${Date.now()}`;
 }
 
 function getPrimaryUrlLabel(type: string) {
@@ -1408,6 +1413,7 @@ function parseTaskForm(formData: FormData) {
         (platform === "INSTAGRAM" ? "Open Instagram post" : "Open Facebook post"))
       : primaryLabel,
     secondaryLabel: readOptional(formData, "secondaryLabel"),
+    socialFollowGroupKey: readOptional(formData, "socialFollowGroupKey"),
     instantRewardLabel: readOptional(formData, "instantRewardLabel"),
     instantRewardDescription: readOptional(formData, "instantRewardDescription"),
     proofHint: readOptional(formData, "proofHint"),
@@ -1478,14 +1484,24 @@ function parseTaskCreateForms(formData: FormData) {
     return [baseTask];
   }
 
+  const socialFollowGroupKey =
+    readOptional(formData, "socialFollowGroupKey") ??
+    baseTask.configJson?.socialFollowGroupKey ??
+    createSocialFollowGroupKey();
+
   return selectedPlatforms.map((platform, index) => {
     const platformLabel = formatEnumLabel(platform);
     const profileUrl = readOptional(formData, `socialFollowUrl:${platform}`);
+    const taskTitle =
+      readOptional(formData, `socialFollowTitle:${platform}`) ??
+      baseTask.title ??
+      getDefaultSocialFollowTitle();
     const configJson = {
       ...(baseTask.configJson ?? {}),
       primaryUrl: profileUrl,
       primaryLabel:
         baseTask.configJson?.primaryLabel || `Open ${platformLabel}`,
+      socialFollowGroupKey,
     };
     const compactConfig = Object.fromEntries(
       Object.entries(configJson).filter(
@@ -1499,7 +1515,7 @@ function parseTaskCreateForms(formData: FormData) {
       isActive: true,
       platform,
       sortOrder: baseTask.sortOrder + index,
-      title: getDefaultSocialFollowTitle(),
+      title: taskTitle,
     };
   });
 }
@@ -1705,8 +1721,8 @@ export async function action({ params, request }: Route.ActionArgs) {
       };
     }
 
-    if (intent === "disable" && taskId) {
-      await disableAdminTask(params.eventSlug, taskId, request);
+    if (intent === "delete" && taskId) {
+      await deleteAdminTask(params.eventSlug, taskId, request);
 
       await syncInstantRewardLinks({
         eventSlug: params.eventSlug,
@@ -1716,7 +1732,23 @@ export async function action({ params, request }: Route.ActionArgs) {
 
       return {
         formKey,
-        success: "Task disabled.",
+        success: "Task deleted.",
+      };
+    }
+
+    if (intent === "rename" && taskId) {
+      await updateAdminTask(
+        params.eventSlug,
+        taskId,
+        {
+          title: formData.get("title")?.toString() ?? "",
+        },
+        request,
+      );
+
+      return {
+        formKey,
+        success: "Task renamed.",
       };
     }
 
@@ -1728,10 +1760,18 @@ export async function action({ params, request }: Route.ActionArgs) {
         isSocialFollowSync
           ? await fetchAdminEvent(params.eventSlug, request)
           : null;
+      const currentFollowTask =
+        isSocialFollowSync
+          ? event?.tasks.find((entry) => entry.id === taskId) ?? null
+          : null;
       const existingFollowTaskByPlatform = new Map(
         (event?.tasks ?? [])
           .filter(
-            (entry) => entry.id !== taskId && entry.type === "SOCIAL_FOLLOW",
+            (entry) =>
+              entry.id !== taskId &&
+              entry.type === "SOCIAL_FOLLOW" &&
+              currentFollowTask &&
+              getSocialFollowGroupKey(entry) === getSocialFollowGroupKey(currentFollowTask),
           )
           .map((entry) => [entry.platform, entry.id]),
       );
@@ -1767,6 +1807,8 @@ export async function action({ params, request }: Route.ActionArgs) {
           (entry) =>
             entry.id !== taskId &&
             entry.type === "SOCIAL_FOLLOW" &&
+            currentFollowTask &&
+            getSocialFollowGroupKey(entry) === getSocialFollowGroupKey(currentFollowTask) &&
             !selectedFollowPlatforms.has(entry.platform),
         );
 
@@ -1868,11 +1910,16 @@ function TaskForm({
     configJson?: {
       primaryUrl?: string;
       requiredPrefix?: string;
+      socialFollowGroupKey?: string;
     } | null;
+    description: string;
     id: string;
     platform: string;
+    points: number;
+    requiresVerification: boolean;
     title: string;
     type: string;
+    verificationType: string;
   }>;
   facebookPostOptions: {
     error: string | null;
@@ -1921,6 +1968,7 @@ function TaskForm({
       secondaryUrl?: string;
       primaryLabel?: string;
       secondaryLabel?: string;
+      socialFollowGroupKey?: string;
       proofHint?: string;
       requiredPrefix?: string;
       commentInstructions?: string;
@@ -1954,7 +2002,12 @@ function TaskForm({
     : [];
   const existingSocialFollowTasks =
     intent === "update" && initialType === "SOCIAL_FOLLOW"
-      ? eventTasks.filter((entry) => entry.type === "SOCIAL_FOLLOW")
+      ? eventTasks.filter(
+          (entry) =>
+            entry.type === "SOCIAL_FOLLOW" &&
+            task &&
+            getSocialFollowGroupKey(entry) === getSocialFollowGroupKey(task),
+        )
       : [];
   const currentGuide = getTaskTypeGuide(selectedType);
   const [selectedPlatform, setSelectedPlatform] = useState(
@@ -1994,6 +2047,25 @@ function TaskForm({
       }),
       {} as Record<PlatformValue, string>,
     ),
+  );
+  const [socialFollowTitles, setSocialFollowTitles] = useState<
+    Record<PlatformValue, string>
+  >(() =>
+    platforms.reduce(
+      (titles, platform) => ({
+        ...titles,
+        [platform]:
+          task?.type === "SOCIAL_FOLLOW" && task.platform === platform
+            ? task.title
+            : (existingSocialFollowTasks.find(
+                (entry) => entry.platform === platform,
+              )?.title ?? getDefaultSocialFollowTitle()),
+      }),
+      {} as Record<PlatformValue, string>,
+    ),
+  );
+  const [socialFollowGroupKey] = useState(() =>
+    task?.configJson?.socialFollowGroupKey ?? createSocialFollowGroupKey(),
   );
   const [selectedVerificationType, setSelectedVerificationType] = useState(
     task?.verificationType ?? initialGuide.defaultVerificationType,
@@ -2462,11 +2534,18 @@ function TaskForm({
           3. Participant-facing copy
         </p>
         {supportsMultiPlatformFollow ? (
-          <input
-            name="title"
-            type="hidden"
-            value={getDefaultSocialFollowTitle()}
-          />
+          <>
+            <input
+              name="title"
+              type="hidden"
+              value={task?.title ?? getDefaultSocialFollowTitle()}
+            />
+            <input
+              name="socialFollowGroupKey"
+              type="hidden"
+              value={socialFollowGroupKey}
+            />
+          </>
         ) : (
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             <AdminField label="Title">
@@ -2511,21 +2590,34 @@ function TaskForm({
       <div className="grid gap-3 sm:grid-cols-2">
         {supportsMultiPlatformFollow
           ? selectedFollowPlatforms.map((platform) => (
-              <AdminField
-                key={platform}
-                label={`${formatEnumLabel(platform)} account / page link`}
-              >
-                <input
-                  className={adminInputClass}
-                  name={`socialFollowUrl:${platform}`}
-                  onChange={(event) =>
-                    handleSocialFollowUrlChange(platform, event.target.value)
-                  }
-                  required
-                  type="url"
-                  value={socialFollowUrls[platform]}
-                />
-              </AdminField>
+              <div className="space-y-3" key={platform}>
+                <AdminField label={`${formatEnumLabel(platform)} task title`}>
+                  <input
+                    className={adminInputClass}
+                    name={`socialFollowTitle:${platform}`}
+                    onChange={(event) =>
+                      setSocialFollowTitles((current) => ({
+                        ...current,
+                        [platform]: event.target.value,
+                      }))
+                    }
+                    required
+                    value={socialFollowTitles[platform]}
+                  />
+                </AdminField>
+                <AdminField label={`${formatEnumLabel(platform)} account / page link`}>
+                  <input
+                    className={adminInputClass}
+                    name={`socialFollowUrl:${platform}`}
+                    onChange={(event) =>
+                      handleSocialFollowUrlChange(platform, event.target.value)
+                    }
+                    required
+                    type="url"
+                    value={socialFollowUrls[platform]}
+                  />
+                </AdminField>
+              </div>
             ))
           : null}
         {!currentGuide.showFacebookCommentFields && !supportsMultiPlatformFollow ? (
@@ -4187,6 +4279,7 @@ function TaskPaneToolbar({
     ? "Hide technical debug"
     : "Show technical debug";
   const oauthDebugNote = "Toggle the Facebook OAuth debug panel.";
+  const deleteTaskNote = "Permanently remove this task and its linked task data.";
 
   return (
     <div className="admin-task-toolbar mb-5">
@@ -4247,6 +4340,25 @@ function TaskPaneToolbar({
             </summary>
             <div className="admin-task-toolbar-menu-panel">
               <p className="admin-task-toolbar-menu-label">Task actions</p>
+              <Form className="admin-task-toolbar-rename" method="post">
+                <input name="intent" type="hidden" value="rename" />
+                <input name="taskId" type="hidden" value={task.id} />
+                <label className="admin-task-toolbar-rename-label" htmlFor={`task-title-${task.id}`}>
+                  Task name
+                </label>
+                <div className="admin-task-toolbar-rename-row">
+                  <input
+                    className="admin-task-toolbar-rename-input"
+                    defaultValue={task.title}
+                    id={`task-title-${task.id}`}
+                    name="title"
+                    required
+                  />
+                  <button className="admin-task-toolbar-rename-button" type="submit">
+                    Save
+                  </button>
+                </div>
+              </Form>
               <Form method="post">
                 <input name="intent" type="hidden" value={nextActiveIntent} />
                 <input name="taskId" type="hidden" value={task.id} />
@@ -4361,6 +4473,77 @@ function TaskPaneToolbar({
                   </svg>
                 ) : null}
               </button>
+              <Form
+                method="post"
+                onSubmit={(event) => {
+                  if (
+                    !window.confirm(
+                      `Delete "${task.title}"? This removes the task and its linked task data.`,
+                    )
+                  ) {
+                    event.preventDefault();
+                  }
+                }}
+              >
+                <input name="intent" type="hidden" value="delete" />
+                <input name="taskId" type="hidden" value={task.id} />
+                <button
+                  className="admin-task-toolbar-menu-row admin-task-toolbar-menu-row-destructive"
+                  type="submit"
+                >
+                  <span className="admin-task-toolbar-menu-row-main">
+                    <span className="admin-task-toolbar-menu-row-icon">
+                      <svg
+                        aria-hidden="true"
+                        className="size-[1.1rem]"
+                        fill="none"
+                        viewBox="0 0 20 20"
+                      >
+                        <path
+                          d="M4.8 6.1H15.2"
+                          stroke="currentColor"
+                          strokeLinecap="round"
+                          strokeWidth="1.6"
+                        />
+                        <path
+                          d="M7.4 6.1V4.8C7.4 4.36 7.76 4 8.2 4H11.8C12.24 4 12.6 4.36 12.6 4.8V6.1"
+                          stroke="currentColor"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth="1.6"
+                        />
+                        <path
+                          d="M6.3 6.1V14.2C6.3 15.19 7.11 16 8.1 16H11.9C12.89 16 13.7 15.19 13.7 14.2V6.1"
+                          stroke="currentColor"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth="1.6"
+                        />
+                        <path
+                          d="M8.7 8.4V13"
+                          stroke="currentColor"
+                          strokeLinecap="round"
+                          strokeWidth="1.6"
+                        />
+                        <path
+                          d="M11.3 8.4V13"
+                          stroke="currentColor"
+                          strokeLinecap="round"
+                          strokeWidth="1.6"
+                        />
+                      </svg>
+                    </span>
+                    <span>
+                      <span className="admin-task-toolbar-menu-row-title">
+                        Delete task
+                      </span>
+                      <span className="admin-task-toolbar-menu-row-note">
+                        {deleteTaskNote}
+                      </span>
+                    </span>
+                  </span>
+                </button>
+              </Form>
             </div>
           </details>
         </div>

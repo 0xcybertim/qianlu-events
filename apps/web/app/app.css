@@ -264,6 +264,58 @@ button {
   text-transform: uppercase;
 }
 
+.admin-task-toolbar-rename {
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border) 76%, transparent);
+  margin-bottom: 0.45rem;
+  padding: 0 0.55rem 0.8rem;
+}
+
+.admin-task-toolbar-rename-label {
+  color: rgb(100 116 139);
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  margin-bottom: 0.45rem;
+  text-transform: uppercase;
+}
+
+.admin-task-toolbar-rename-row {
+  display: grid;
+  gap: 0.45rem;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.admin-task-toolbar-rename-input {
+  background: white;
+  border: 1px solid var(--color-border);
+  border-radius: 0.9rem;
+  color: var(--color-text);
+  font-size: 0.95rem;
+  min-height: 2.75rem;
+  outline: none;
+  padding: 0 0.8rem;
+  width: 100%;
+}
+
+.admin-task-toolbar-rename-input:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 22%, transparent);
+}
+
+.admin-task-toolbar-rename-button {
+  background: var(--color-primary);
+  border: 0;
+  border-radius: 0.9rem;
+  color: var(--color-primary-contrast);
+  font-size: 0.86rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  min-height: 2.75rem;
+  padding: 0 0.95rem;
+  text-transform: uppercase;
+}
+
 .admin-task-toolbar-menu-row {
   align-items: center;
   background: transparent;
@@ -280,6 +332,19 @@ button {
 
 .admin-task-toolbar-menu-row:hover {
   background: color-mix(in srgb, white 35%, var(--color-surface));
+}
+
+.admin-task-toolbar-menu-row-destructive {
+  color: #b42318;
+}
+
+.admin-task-toolbar-menu-row-destructive:hover {
+  background: #fff1f1;
+}
+
+.admin-task-toolbar-menu-row-destructive .admin-task-toolbar-menu-row-icon,
+.admin-task-toolbar-menu-row-destructive .admin-task-toolbar-menu-row-note {
+  color: inherit;
 }
 
 .admin-task-toolbar-menu-row-main {

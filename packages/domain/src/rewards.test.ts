@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { calculateRewardSnapshot } from "./rewards.js";
 
-test("configured ANY instant reward unlocks when one linked task completes", () => {
+test("configured instant reward waits until every linked task is done", () => {
   const snapshot = calculateRewardSnapshot({
     tasks: [
       {
@@ -43,15 +43,15 @@ test("configured ANY instant reward unlocks when one linked task completes", () 
     rewardTypes: ["INSTANT_REWARD"],
   });
 
-  assert.equal(snapshot.instantRewardEligible, true);
+  assert.equal(snapshot.instantRewardEligible, false);
   assert.deepEqual(snapshot.instantRewards, [
     {
-      eligible: true,
+      eligible: false,
       label: "Darts throw",
       rewardKey: "darts",
       taskIds: ["task-form", "task-photo"],
-      taskMatchMode: "ANY",
-      verified: true,
+      taskMatchMode: "ALL",
+      verified: false,
     },
   ]);
 });
@@ -161,7 +161,7 @@ test("optimistic tasks count previously claimed attempts as verified", () => {
       label: "Darts throw",
       rewardKey: "darts",
       taskIds: ["task-form"],
-      taskMatchMode: "ANY",
+      taskMatchMode: "ALL",
       verified: true,
     },
   ]);

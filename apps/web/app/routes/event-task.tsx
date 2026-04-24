@@ -20,6 +20,7 @@ import {
   summarizeAnalyticsCounts,
   trackParticipantAnalyticsEvent,
 } from "../lib/marketing";
+import { getSocialFollowGroupKey } from "../lib/social-follow";
 import {
   getTaskActionLinks,
   getTaskCategoryLabel,
@@ -905,9 +906,12 @@ export default function EventTask({ loaderData, params }: Route.ComponentProps) 
     throw new Response("Task not found.", { status: 404 });
   }
 
+  const socialFollowGroupKey = getSocialFollowGroupKey(taskItem.task);
   const socialFollowItems =
-    taskItem.task.type === "SOCIAL_FOLLOW"
-      ? taskItems.filter((item) => item.task.type === "SOCIAL_FOLLOW")
+    taskItem.task.type === "SOCIAL_FOLLOW" && socialFollowGroupKey
+      ? taskItems.filter(
+          (item) => getSocialFollowGroupKey(item.task) === socialFollowGroupKey,
+        )
       : [];
   const taskInstantReward = getTaskInstantRewardState(
     loaderData,
@@ -1259,7 +1263,7 @@ export default function EventTask({ loaderData, params }: Route.ComponentProps) 
                             type="submit"
                           >
                             {hasClaimedFollow
-                              ? "Follow claimed"
+                              ? "Done"
                               : `I followed on ${platformLabel}`}
                           </Button>
                         </div>
@@ -1540,13 +1544,13 @@ export default function EventTask({ loaderData, params }: Route.ComponentProps) 
                   ? verifiedSocialFollowCount === socialFollowItems.length
                     ? "All selected follows have been verified."
                     : claimedSocialFollowCount > 0
-                      ? `${claimedSocialFollowCount} of ${socialFollowItems.length} follows have been claimed. Any remaining staff checks will show on the badges above.`
-                      : "Claim each follow here after you complete it on the social app."
+                      ? `${claimedSocialFollowCount} of ${socialFollowItems.length} follows are done. Any remaining staff checks will show on the badges above.`
+                      : "Mark each follow as done here after you complete it on the social app."
                   : claimedSocialFollowCount === socialFollowItems.length
-                    ? "All selected follows have already been claimed and counted."
+                    ? "All selected follows are already done and counted."
                     : claimedSocialFollowCount > 0
-                      ? `${claimedSocialFollowCount} of ${socialFollowItems.length} follows have already been claimed and counted.`
-                      : "Claim each follow here after you complete it on the social app to add the points immediately."}
+                      ? `${claimedSocialFollowCount} of ${socialFollowItems.length} follows are already done and counted.`
+                      : "Mark each follow as done here after you complete it on the social app to add the points immediately."}
               </div>
             </div>
           ) : isStampScan ? (

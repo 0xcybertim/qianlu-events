@@ -452,7 +452,7 @@ export async function updateAdminTask(
   return adminTaskSchema.parse(await response.json());
 }
 
-export async function disableAdminTask(
+export async function deleteAdminTask(
   eventSlug: string,
   taskId: string,
   request?: Request,

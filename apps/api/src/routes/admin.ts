@@ -3495,16 +3495,13 @@ export function registerAdminRoutes(app: FastifyInstance) {
         };
       }
 
-      const updatedTask = await prisma.task.update({
+      await prisma.task.delete({
         where: { id: task.id },
-        data: {
-          isActive: false,
-        },
       });
 
       await recalculateEventSessions(access.event.id);
 
-      return updatedTask;
+      return task;
     },
   );
 

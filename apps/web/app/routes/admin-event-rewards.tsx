@@ -51,9 +51,6 @@ function parseInstantRewards(formData: FormData) {
   const descriptions = formData
     .getAll("instantRewardDescription")
     .map((value) => value.toString().trim());
-  const matchModes = formData
-    .getAll("instantRewardMatchMode")
-    .map((value) => value.toString());
 
   return keys
     .map((key, index) => ({
@@ -64,7 +61,7 @@ function parseInstantRewards(formData: FormData) {
         .getAll(`instantRewardTaskIds:${index}`)
         .map((value) => value.toString())
         .filter(Boolean),
-      taskMatchMode: matchModes[index] === "ALL" ? "ALL" : "ANY",
+      taskMatchMode: "ALL" as const,
     }))
     .filter((reward) => reward.key && reward.label);
 }
@@ -169,7 +166,7 @@ export default function AdminEventRewards({
       key: "",
       label: "",
       taskIds: [],
-      taskMatchMode: "ANY" as const,
+      taskMatchMode: "ALL" as const,
     },
   ];
   const participantMessaging = event.settingsJson?.participantMessaging;
@@ -211,8 +208,8 @@ export default function AdminEventRewards({
           </h2>
           <p className="mt-2 text-sm leading-6 text-slate-600">
             Define point tiers, point-weighted raffle messaging, and task-linked
-            instant rewards here. Instant rewards can unlock when any linked task
-            is done or only when all linked tasks are done.
+            instant rewards here. Instant rewards unlock only when all linked
+            tasks are done.
           </p>
           <Form
             action={`/admin/events/${event.slug}/rewards`}
@@ -344,14 +341,10 @@ export default function AdminEventRewards({
                         />
                       </AdminField>
                       <AdminField label="Unlock rule">
-                        <select
-                          className={adminInputClass}
-                          defaultValue={reward.taskMatchMode}
-                          name="instantRewardMatchMode"
-                        >
-                          <option value="ANY">Any linked task</option>
-                          <option value="ALL">All linked tasks</option>
-                        </select>
+                        <input name="instantRewardMatchMode" type="hidden" value="ALL" />
+                        <div className={`${adminInputClass} flex min-h-11 items-center`}>
+                          All linked tasks
+                        </div>
                       </AdminField>
                       <AdminField label="Description">
                         <input
@@ -473,7 +466,7 @@ export default function AdminEventRewards({
                     <div>
                       <p className="font-semibold">{reward.label}</p>
                       <p className="mt-1 text-sm text-slate-600">
-                        {reward.taskMatchMode === "ALL" ? "All of" : "Any of"}{" "}
+                        All of{" "}
                         {reward.linkedTasks.length > 0
                           ? reward.linkedTasks.map((task) => task.title).join(", ")
                           : "no tasks linked yet"}

@@ -118,7 +118,7 @@ export function getStatusMeta(status: TaskAttemptStatus) {
     case "VERIFIED":
       return { label: "Verified", tone: "verified" as const };
     case "COMPLETED_BY_USER":
-      return { label: "Claimed", tone: "claimed" as const };
+      return { label: "Done", tone: "claimed" as const };
     case "PENDING_STAFF_CHECK":
       return { label: "Pending", tone: "warning" as const };
     case "PENDING_AUTO_VERIFICATION":
